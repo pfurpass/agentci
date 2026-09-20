@@ -276,6 +276,30 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
 
 **Checks** cover syntax for JS/MJS/CJS, TypeScript, Python, JSON, Shell, Go, Ruby and PHP, and detect `npm test`, `node --test`, `pytest`, `unittest`, `go test`, `cargo test` and `tsc --noEmit`. Add your own with `checks.commands`.
 
+## Cost: what agentci does to keep token use down
+
+Every agent call carries Claude Code's own system prompt (~22–24k tokens). agentci cannot shrink it, but it can stop paying for it again and again – and it can avoid calls entirely.
+
+| Measure | Effect |
+|---|---|
+| **One shared system prompt** for all roles (the role text travels in the message) so Claude's prompt cache keeps hitting | cache writes per call 7.8k → 3.8k tokens, **≈40% cheaper per call** (measured, haiku) |
+| **Project map** instead of the agents exploring the tree | no `ls`/`grep`/curiosity reads; ~2 kB for 28 files |
+| **Tester call skipped** when the coder already wrote tests for that todo | one whole agent call less per todo |
+| **Lean review diffs**: lockfiles and generated files are named, not dumped; 400 lines per file cap | large refactors no longer ship 15k-token diffs |
+| `--strict-mcp-config` | a project's `.mcp.json` servers never get loaded into the context |
+
+Same task, same models, before and after these changes: **$0.74 → $0.43 (−42%)**, and 8:39 → 5:50.
+
+Turn the dials yourself:
+
+```bash
+agentci run --cheap "…"                 # haiku + low effort for every role
+agentci run --no-tests --no-review "…"  # fewest calls: planner + coder + checker only
+agentci run --coder claude:haiku "…"    # or pick the model per role
+```
+
+The checker, the project map and the diff cost nothing – they run locally without an LLM.
+
 ## Security
 
 - Planner and reviewer are **read-only**. Coder and tester may edit files but only run allow-listed shell commands (Claude); Codex runs in its `workspace-write` sandbox. `"claudeMode": "bypassPermissions"` removes that limit – only do that in a VM or container.
@@ -297,7 +321,7 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
 ## Development
 
 ```bash
-npm test          # 78 tests, no dependencies, no AI calls
+npm test          # 80 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 

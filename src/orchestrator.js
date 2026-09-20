@@ -272,6 +272,13 @@ export class Orchestrator extends EventEmitter {
         const diff = diffText(before, after, changes);
 
         // Reviewer and tester work in parallel: one reads the diff, the other writes tests.
+        // The coder often writes tests on its own – then the tester call is pure cost.
+        if (!testsWritten && p.skipTesterIfTested !== false && changes.changed.some(isTestFile)) {
+          testsWritten = true;
+          todo.testsByCoder = true;
+          this.send('note', { todo: todo.id, level: 'info', text: 'coder already wrote tests – tester call skipped' });
+        }
+
         // Reviewer/tester failures (e.g. usage limit) degrade the todo instead of failing it.
         const reviewJob = this.callAgent('reviewer', 'review', R.withAttachments(R.reviewPrompt(st, todo, diff, 'all passed'), formatAttachments(this.attachments())), { schema: R.REVIEW_SCHEMA, todo })
           .catch((e) => this.soften(e, todo, 'review failed – todo is unreviewed', () => { todo.unreviewed = true; }));
@@ -392,6 +399,10 @@ const label = (c) => `${c.provider}${c.model ? ':' + c.model : ''}`;
 
 export function isUsageLimit(msg = '') {
   return /usage limit|rate.?limit|quota|hit your limit|too many requests|\b429\b|limit reached|out of credits/i.test(msg);
+}
+
+export function isTestFile(p) {
+  return /(^|\/)(tests?|__tests__|spec)\//.test(p) || /[._-](test|spec)\.[\w]+$/.test(p) || /^test_.*\.py$/.test(p.split('/').pop() || '');
 }
 
 function statusOf(st, id) {

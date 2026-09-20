@@ -59,6 +59,7 @@ ${color.bold('Options')}
   --lock-dir                  for "ui": do not allow switching the project folder
   --serve                     for "bundle": offer it for download on the network
   --dir <path>                for "bundle": target folder for the package
+  --cheap                     cheapest useful setup: haiku + low effort for every role
   --attach <file>             for "run"/"plan": give the team a screenshot, spec or log
                               (repeatable; stored in .agentci/attachments)
   --local                     Ignore the gateway for this run (claude/codex run locally)
@@ -82,6 +83,7 @@ function parseArgs(argv) {
     else if (a === '--serve') out.serve = true;
     else if (a === '--lock-dir') out.lockDir = true;
     else if (a === '--attach') out.attach = [...(out.attach || []), argv[++i]];
+    else if (a === '--cheap') out.cheap = true;
     else if (a === '--allow-host') out.allowHost = [...(out.allowHost || []), ...String(argv[++i] || '').split(',').map((h) => h.trim()).filter(Boolean)];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--local') out.local = true;
@@ -98,6 +100,13 @@ function parseArgs(argv) {
 }
 
 function applyOverrides(cfg, args) {
+  // Cheapest useful setup: small model, low effort everywhere. Explicit --role flags still win.
+  if (args.cheap) {
+    for (const [role, rc] of Object.entries(cfg.roles)) {
+      if (rc.provider === 'claude') cfg.roles[role] = { ...rc, model: 'haiku', effort: 'low' };
+      else cfg.roles[role] = { ...rc, effort: 'low' };
+    }
+  }
   for (const [role, spec] of Object.entries(args.roles)) {
     if (!spec) throw new Error(`--${role} needs a value, e.g. claude:sonnet`);
     const [provider, model] = spec.split(':');
@@ -391,9 +400,9 @@ async function demo(args) {
 // Which options make sense for which command – a typo should not be swallowed silently.
 const FLAGS = {
   common: ['dir', 'help'],
-  run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach'],
-  plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach'],
-  resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
+  run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap'],
+  plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap'],
+  resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'cheap'],
   ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost', 'lockDir'],
   gateway: ['port', 'host', 'token', 'cert', 'key', 'noUi', 'dryRun'],
   bundle: ['serve', 'port', 'host', 'dirOut'],
@@ -402,7 +411,7 @@ const FLAGS = {
 };
 const FLAG_NAMES = {
   port: '--port', host: '--host', token: '--token', cert: '--cert', key: '--key', noOpen: '--no-open',
-  noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', lockDir: '--lock-dir', attach: '--attach', local: '--local', noReview: '--no-review', noTests: '--no-tests',
+  noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', lockDir: '--lock-dir', attach: '--attach', cheap: '--cheap', local: '--local', noReview: '--no-review', noTests: '--no-tests',
   docs: '--docs', fixAttempts: '--fix-attempts', dryRun: '--dry-run', roles: '--planner/--coder/…', dirOut: '--dir',
 };
 

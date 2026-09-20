@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Orchestrator } from '../src/orchestrator.js';
+import { diffText } from '../src/snapshot.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { claudeProvider } from '../src/providers/claude.js';
 import { codexProvider } from '../src/providers/codex.js';
@@ -118,9 +119,12 @@ out({ type: 'result', subtype: 'success', is_error: false, result: '{"approved":
   const p = claudeProvider({ bin, permissions: { claudeMode: 'acceptEdits', claudeAllowedTools: ['Edit', 'Bash(npm *)'] } });
   const res = await p.run({ prompt: 'PROMPT', systemPrompt: 'SYS', cwd: dir, model: 'sonnet', effort: 'high', schema: { type: 'object' }, canEdit: true, timeoutMs: 10_000, onEvent: (e) => events.push(e) });
   const { args, stdin } = JSON.parse(fs.readFileSync(argsFile, 'utf8'));
-  assert.equal(stdin, 'PROMPT');
+  assert.match(stdin, /^YOUR ROLE\nSYS\n\n---\n\nPROMPT$/, 'the role travels in the message, not in the system prompt');
   assert.ok(!args.includes('--bare'), 'bare mode would bypass the subscription login');
-  for (const a of ['-p', '--append-system-prompt', 'SYS', '--model', 'sonnet', '--effort', 'high', '--json-schema', 'acceptEdits', 'Bash(npm *)']) assert.ok(args.includes(a), a);
+  for (const a of ['-p', '--append-system-prompt', '--strict-mcp-config', '--model', 'sonnet', '--effort', 'high', '--json-schema', 'acceptEdits', 'Bash(npm *)']) assert.ok(args.includes(a), a);
+  const sys = args[args.indexOf('--append-system-prompt') + 1];
+  assert.match(sys, /one agent in an agentci team/, 'one shared system prompt keeps Claude\'s prompt cache warm');
+  assert.ok(!sys.includes('SYS'), 'the role text must not vary the cached prefix');
   assert.deepEqual(res.data, { approved: true, summary: 's', issues: [] });
   assert.equal(res.costUsd, 0.5);
   assert.deepEqual(events, [{ type: 'tool', name: 'Edit', detail: 'x.js' }]);
@@ -258,4 +262,37 @@ test('prompts carry the project map so agents need not explore the tree', async 
   off.pipeline.projectMap = false;
   const orch2 = new Orchestrator({ cwd: tmp(), config: off, providers: { fake: fake({ plan: ({ prompt }) => { assert.ok(!prompt.includes('PROJECT MAP')); return { data: { summary: 's', todos: [] } }; } }).provider } });
   await assert.rejects(orch2.run('x'), /no todos/);
+});
+
+test('the tester call is skipped when the coder already wrote tests', async () => {
+  const cwd = tmp();
+  const f = fake({
+    plan: () => ({ data: { summary: 's', todos: [{ id: 'T1', title: 'a', details: '', dependsOn: [], acceptance: '' }] } }),
+    implement: ({ cwd: c }) => {
+      fs.writeFileSync(path.join(c, 'm.mjs'), 'export const add = (a, b) => a + b;\n');
+      fs.writeFileSync(path.join(c, 'm.test.mjs'), "import test from 'node:test';\nimport assert from 'node:assert';\nimport { add } from './m.mjs';\ntest('add', () => assert.equal(add(2, 3), 5));\n");
+    },
+    review: () => ({ data: { approved: true, summary: 'ok', issues: [] } }),
+  });
+  const notes = [];
+  const orch = new Orchestrator({ cwd, config: config(), providers: { fake: f.provider } });
+  orch.on('event', (e) => { if (e.type === 'note') notes.push(e.text); });
+  const st = await orch.run('task');
+  assert.equal(st.todos[0].status, 'done');
+  assert.ok(!f.calls.some((c) => c.startsWith('tester:')), 'no tester call was needed');
+  assert.match(notes.join(), /tester call skipped/);
+  assert.equal(st.todos[0].testsMissing, undefined, 'and the todo is not marked untested');
+});
+
+test('diffs skip generated files and cap long files', () => {
+  const before = new Map([['package-lock.json', { hash: '1', content: '{"a":1}' }]]);
+  const after = new Map([
+    ['package-lock.json', { hash: '2', content: '{"a":2}' }],
+    ['big.js', { hash: '3', content: Array.from({ length: 900 }, (_, i) => `line ${i}`).join('\n') }],
+  ]);
+  const text = diffText(before, after, { added: ['big.js'], modified: ['package-lock.json'], deleted: [] });
+  assert.match(text, /package-lock\.json\n\(generated file – changed, not shown\)/);
+  assert.ok(!text.includes('"a":2'), 'the lockfile content is not shipped');
+  assert.match(text, /more lines – open the file if you need them/);
+  assert.ok(text.split('\n').length < 500, 'the long file is capped');
 });

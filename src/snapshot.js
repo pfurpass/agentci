@@ -74,12 +74,25 @@ export function unifiedDiff(file, oldText, newText, context = 3) {
   return out.join('\n') + '\n';
 }
 
-export function diffText(before, after, changes, maxChars = 60_000) {
+// Files nobody needs to review line by line – they only cost tokens.
+const GENERATED = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Cargo\.lock|go\.sum|composer\.lock)$|\.min\.(js|css)$|\.(map|snap)$/;
+const MAX_DIFF_LINES_PER_FILE = 400;
+
+export function diffText(before, after, changes, maxChars = 40_000) {
   let text = '';
   for (const f of [...changes.added, ...changes.modified, ...changes.deleted]) {
+    if (GENERATED.test(f)) {
+      text += `--- ${f}\n(generated file – changed, not shown)\n\n`;
+      continue;
+    }
     const oldC = before.get(f)?.content ?? null;
     const newC = after.get(f)?.content ?? null;
-    text += unifiedDiff(f, oldC, newC) + '\n';
+    let d = unifiedDiff(f, oldC, newC);
+    const lines = d.split('\n');
+    if (lines.length > MAX_DIFF_LINES_PER_FILE) {
+      d = `${lines.slice(0, MAX_DIFF_LINES_PER_FILE).join('\n')}\n… (${lines.length - MAX_DIFF_LINES_PER_FILE} more lines – open the file if you need them)\n`;
+    }
+    text += d + '\n';
     if (text.length > maxChars) return text.slice(0, maxChars) + '\n… (diff truncated – read the remaining files directly)\n';
   }
   return text;
