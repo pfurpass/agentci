@@ -310,6 +310,8 @@ kbd { font-size: 11px; padding: 1px 6px; border: 1px solid var(--line-2); border
 .switch input:checked + span::after { transform: translateX(14px); background: #fff; }
 
 .options { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.cheap-toggle { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 7px 12px; margin-right: auto; }
+.cheap-toggle:has(input:checked) { border-color: color-mix(in srgb, var(--checker) 45%, transparent); color: var(--checker); }
 .stepper { display: inline-flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 3px 3px 3px 12px; font-size: 13px; color: var(--muted); }
 .stepper span { margin-right: 8px; }
 .stepper button { width: 28px; height: 28px; border-radius: 7px; border: 0; background: var(--panel-3); cursor: pointer; font-size: 15px; }

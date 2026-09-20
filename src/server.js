@@ -317,6 +317,12 @@ export function buildConfig(cwd, body = {}) {
       enabled: role === 'planner' || role === 'coder' ? true : rc.enabled !== false,
     };
   }
+  // Cheap mode: smallest model and lowest effort for every role (same as CLI --cheap).
+  if (body.cheap) {
+    for (const [role, rc] of Object.entries(cfg.roles)) {
+      cfg.roles[role] = { ...rc, effort: 'low', ...(rc.provider === 'claude' ? { model: 'haiku' } : {}) };
+    }
+  }
   if (typeof body.writeTests === 'boolean') cfg.pipeline.writeTests = body.writeTests;
   if (Number.isFinite(body.maxFixAttempts)) cfg.pipeline.maxFixAttempts = Math.max(0, Math.min(10, body.maxFixAttempts));
   return validateConfig(cfg);

@@ -362,3 +362,15 @@ test('switching folders takes the draft attachments along', () => withServer(asy
   assert.ok(fs.existsSync(path.join(cwd, keep.path)), 'the untouched one stays behind in the old folder');
   assert.ok(fs.existsSync(path.join(cwd, up.path)), 'the original is copied, not moved away');
 }));
+
+test('cheap mode from the UI downgrades every role', () => {
+  const cwd = tmp();
+  const cfg = buildConfig(cwd, { cheap: true, roles: { coder: { provider: 'claude', model: 'opus' }, reviewer: { provider: 'codex' } } });
+  assert.equal(cfg.roles.coder.model, 'haiku');
+  assert.equal(cfg.roles.coder.effort, 'low');
+  assert.equal(cfg.roles.planner.model, 'haiku');
+  assert.equal(cfg.roles.reviewer.model, null, 'codex keeps its default model');
+  assert.equal(cfg.roles.reviewer.effort, 'low');
+  const normal = buildConfig(cwd, { roles: { coder: { provider: 'claude', model: 'opus' } } });
+  assert.equal(normal.roles.coder.model, 'opus', 'without cheap nothing is downgraded');
+});

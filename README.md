@@ -292,6 +292,8 @@ Same task, same models, before and after these changes: **$0.74 → $0.43 (−42
 
 Turn the dials yourself:
 
+In the web interface the same thing is one click: the **Cheap mode** switch below the team.
+
 ```bash
 agentci run --cheap "…"                 # haiku + low effort for every role
 agentci run --no-tests --no-review "…"  # fewest calls: planner + coder + checker only
@@ -321,7 +323,7 @@ The checker, the project map and the diff cost nothing – they run locally with
 ## Development
 
 ```bash
-npm test          # 80 tests, no dependencies, no AI calls
+npm test          # 81 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 

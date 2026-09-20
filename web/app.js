@@ -65,7 +65,7 @@ const app = {
   agents: new Map(),    // id -> agent info
   openTodos: new Set(),
   editing: null,        // todo id being edited
-  form: { roles: {}, writeTests: true, fixAttempts: 3 },
+  form: { roles: {}, writeTests: true, fixAttempts: 3, cheap: false },
   attachments: [],
 };
 
@@ -265,7 +265,7 @@ function bindGateway() {
 function formBody(task) {
   const roles = {};
   for (const [k, f] of Object.entries(app.form.roles)) roles[k] = { provider: f.provider, model: f.model.trim() || null, enabled: f.enabled };
-  return { task, roles, writeTests: app.form.roles.tester.enabled, maxFixAttempts: app.form.fixAttempts };
+  return { task, roles, writeTests: app.form.roles.tester.enabled, maxFixAttempts: app.form.fixAttempts, cheap: app.form.cheap };
 }
 
 async function startRun(kind) {
@@ -312,6 +312,18 @@ function bindCompose() {
   $('#teamGrid').addEventListener('input', (e) => {
     const m = e.target.dataset.model;
     if (m) app.form.roles[m].model = e.target.value;
+  });
+  $('#cheapMode').addEventListener('change', (e) => {
+    app.form.cheap = e.target.checked;
+    if (app.form.cheap) {
+      app.form.before = JSON.parse(JSON.stringify(app.form.roles));
+      for (const f of Object.values(app.form.roles)) if (f.provider === 'claude') f.model = 'haiku';
+      toast('Cheap mode: haiku + low effort for every role', 'success');
+    } else if (app.form.before) {
+      app.form.roles = app.form.before;
+      app.form.before = null;
+    }
+    renderTeam();
   });
   document.querySelectorAll('.stepper button').forEach((b) => {
     b.onclick = () => {
