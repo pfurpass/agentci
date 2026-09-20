@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { snapshot } from '../snapshot.js';
+import crypto2 from 'node:crypto';
 import { safeRel } from '../gateway/paths.js';
 
 // Runs an agent on an agentci gateway (a machine with internet + Claude/Codex logins).
@@ -29,10 +30,17 @@ export function remoteProvider({ url, token, target, ignore = [] }) {
 
   return {
     name: `remote:${target}`,
-    async run({ role, phase, prompt, systemPrompt, cwd, model, effort, schema, canEdit, timeoutMs, onEvent, signal, todo }) {
+    async run({ role, phase, prompt, systemPrompt, cwd, model, effort, schema, canEdit, timeoutMs, onEvent, signal, todo, attachments = [] }) {
       const started = Date.now();
       const snap = snapshot(cwd, ignore);
       const manifest = Object.fromEntries([...snap].map(([f, v]) => [f, v.hash]));
+      // Attachments live in .agentci/ (ignored for change detection) – ship them explicitly.
+      for (const a of attachments) {
+        try {
+          const buf = fs.readFileSync(path.join(cwd, a.path));
+          manifest[a.path] = crypto2.createHash('sha1').update(buf).digest('hex');
+        } catch { /* vanished – the prompt will just reference a missing file */ }
+      }
       const session = sessionId(cwd);
       const slot = canEdit ? 'edit' : 'ro';
       const callSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs + 120_000)]) : AbortSignal.timeout(timeoutMs + 120_000);
@@ -43,7 +51,7 @@ export function remoteProvider({ url, token, target, ignore = [] }) {
         const files = Object.fromEntries(need.map((f) => [f, fs.readFileSync(path.join(cwd, f)).toString('base64')]));
         try {
           res = await post('/v1/run', {
-            session, slot, manifest, files, ignore, provider: target,
+            session, slot, manifest, files, ignore, provider: target, attachments,
             project: path.basename(path.resolve(cwd)), client: os.hostname(),
             role, phase, prompt, systemPrompt, model, effort, schema, canEdit, timeoutMs,
             todo: todo ? { id: todo.id, title: todo.title } : undefined,

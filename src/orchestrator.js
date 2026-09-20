@@ -5,6 +5,7 @@ import { stateDir } from './config.js';
 import { snapshot, diffSnapshots, diffText } from './snapshot.js';
 import { runChecks } from './checker.js';
 import { createCodeMapCache, formatCodeMap, graphData } from './codemap.js';
+import { listAttachments, formatAttachments } from './attachments.js';
 import * as R from './roles.js';
 
 export class AbortedError extends Error {
@@ -56,6 +57,11 @@ export class Orchestrator extends EventEmitter {
     this.abortController.abort();
   }
 
+  // Files the user attached (screenshots, specs). Agents get their paths and read them themselves.
+  attachments() {
+    return this.state?.attachments?.length ? this.state.attachments : listAttachments(this.cwd);
+  }
+
   // Static project map – cheap for us, expensive for an LLM to rediscover on every call.
   codeMap() {
     return this.codeMapCache(this.cwd, this.cfg.ignore);
@@ -64,6 +70,12 @@ export class Orchestrator extends EventEmitter {
   mapText(changed = [], maxChars = 9000) {
     if (this.cfg.pipeline.projectMap === false) return '';
     return formatCodeMap(this.codeMap(), { changed, maxChars });
+  }
+
+  // Prompt extras every role gets: the project map plus the user's attachments.
+  context(prompt, changed = [], maxChars = 9000) {
+    const withFiles = R.withAttachments(prompt, formatAttachments(this.attachments()));
+    return R.withMap(withFiles, this.mapText(changed, maxChars));
   }
 
   has(role) {
@@ -103,6 +115,7 @@ export class Orchestrator extends EventEmitter {
         role, phase, todo, prompt, schema, canEdit,
         systemPrompt: R.SYSTEM[role === 'coder' && phase === 'fix' ? 'fixer' : role],
         cwd: this.cwd, model: cand.model || undefined, effort: ci === 0 ? rc.effort || undefined : undefined,
+      attachments: this.attachments(),
         timeoutMs: (this.cfg.pipeline.timeoutMinutes || 20) * 60_000,
         signal: this.abortController.signal,
         onEvent: (ev) => {
@@ -148,12 +161,12 @@ export class Orchestrator extends EventEmitter {
     this.state = {
       runId: new Date().toISOString().replace(/[:.]/g, '-'),
       task, summary: '', todos: [], costUsd: 0, startedAt: Date.now(), phase: 'planning',
-      team: teamOf(this.cfg), gateway: this.gateway,
+      team: teamOf(this.cfg), gateway: this.gateway, attachments: listAttachments(this.cwd),
     };
     this.send('run.start', { runId: this.state.runId, task, team: this.state.team, cwd: this.cwd, gateway: this.gateway });
     this.save();
     try {
-      const res = await this.callAgent('planner', 'plan', R.withMap(R.planPrompt(task, projectInfo(this.cwd, this.cfg.ignore, this.codeMap())), this.mapText([], 14_000)), { schema: R.PLAN_SCHEMA });
+      const res = await this.callAgent('planner', 'plan', this.context(R.planPrompt(task, projectInfo(this.cwd, this.cfg.ignore, this.codeMap())), [], 14_000), { schema: R.PLAN_SCHEMA });
       this.state.summary = res.data.summary || '';
       this.state.todos = normalizeTodos(res.data.todos || []);
       this.state.phase = 'planned';
@@ -192,7 +205,7 @@ export class Orchestrator extends EventEmitter {
 
       if (this.has('docs') && st.todos.some((t) => t.status === 'done')) {
         this.send('docs.start', {});
-        await this.callAgent('docs', 'docs', R.withMap(R.docsPrompt(st), this.mapText()), { canEdit: true });
+        await this.callAgent('docs', 'docs', this.context(R.docsPrompt(st)), { canEdit: true });
       }
       st.phase = 'finished';
       st.finishedAt = Date.now();
@@ -239,7 +252,7 @@ export class Orchestrator extends EventEmitter {
 
     const before = snapshot(this.cwd, this.cfg.ignore);
     try {
-      await this.callAgent('coder', 'implement', R.withMap(R.implementPrompt(st, todo), this.mapText()), { canEdit: true, todo });
+      await this.callAgent('coder', 'implement', this.context(R.implementPrompt(st, todo)), { canEdit: true, todo });
       if (!this.changedSince(before)) {
         // An agent that "succeeds" without touching a file usually couldn't use its tools – don't trust it.
         this.send('note', { todo: todo.id, level: 'warn', text: 'coder changed no file – second attempt' });
@@ -260,10 +273,10 @@ export class Orchestrator extends EventEmitter {
 
         // Reviewer and tester work in parallel: one reads the diff, the other writes tests.
         // Reviewer/tester failures (e.g. usage limit) degrade the todo instead of failing it.
-        const reviewJob = this.callAgent('reviewer', 'review', R.reviewPrompt(st, todo, diff, 'alle bestanden'), { schema: R.REVIEW_SCHEMA, todo })
+        const reviewJob = this.callAgent('reviewer', 'review', R.withAttachments(R.reviewPrompt(st, todo, diff, 'all passed'), formatAttachments(this.attachments())), { schema: R.REVIEW_SCHEMA, todo })
           .catch((e) => this.soften(e, todo, 'review failed – todo is unreviewed', () => { todo.unreviewed = true; }));
         const testJob = testsWritten ? null
-          : this.callAgent('tester', 'test', R.withMap(R.testPrompt(st, todo, changes.changed), this.mapText(changes.changed)), { canEdit: true, todo })
+          : this.callAgent('tester', 'test', this.context(R.testPrompt(st, todo, changes.changed), changes.changed), { canEdit: true, todo })
             .catch((e) => this.soften(e, todo, 'tester failed', () => { todo.testerFailed = true; }));
         const [review] = await Promise.all([reviewJob, testJob]);
 
@@ -286,7 +299,7 @@ export class Orchestrator extends EventEmitter {
           this.send('note', { todo: todo.id, level: 'warn', text: 'maximum review rounds reached – finishing the todo with a note' });
           break;
         }
-        await this.callAgent('coder', 'fix', R.fixPrompt(st, todo, `Code-Review:\n${blocking}`), { canEdit: true, todo });
+        await this.callAgent('coder', 'fix', this.context(R.fixPrompt(st, todo, `Code review:\n${blocking}`)), { canEdit: true, todo });
         if (!(await this.checkAndFix(todo, before))) return this.finish(todo, 'failed', before);
       }
 
@@ -294,7 +307,7 @@ export class Orchestrator extends EventEmitter {
         // no reviewer configured: tester still runs
         const pre = snapshot(this.cwd, this.cfg.ignore);
         const changes = diffSnapshots(before, pre);
-        await this.callAgent('tester', 'test', R.withMap(R.testPrompt(st, todo, changes.changed), this.mapText(changes.changed)), { canEdit: true, todo })
+        await this.callAgent('tester', 'test', this.context(R.testPrompt(st, todo, changes.changed), changes.changed), { canEdit: true, todo })
           .catch((e) => this.soften(e, todo, 'tester failed', () => { todo.testerFailed = true; }));
         this.checkTesterWrote(todo, pre);
         if (!(await this.checkAndFix(todo, before))) return this.finish(todo, 'failed', before);
@@ -354,7 +367,7 @@ export class Orchestrator extends EventEmitter {
       }
       todo.fixAttempts = (todo.fixAttempts || 0) + 1;
       this.send('fix', { todo: todo.id, attempt: attempt + 1, max });
-      await this.callAgent('coder', 'fix', R.fixPrompt(this.state, todo, `${hint ? hint + '\n\n' : ''}${res.report}`), { canEdit: true, todo });
+      await this.callAgent('coder', 'fix', this.context(R.fixPrompt(this.state, todo, `${hint ? hint + '\n\n' : ''}${res.report}`)), { canEdit: true, todo });
     }
   }
 

@@ -126,7 +126,7 @@ export function createGateway({ port = 4318, host = '0.0.0.0', token, cert, key,
         role: body.role, phase: body.phase, prompt: body.prompt, systemPrompt: body.systemPrompt,
         schema: body.schema || undefined, canEdit: Boolean(body.canEdit), model: body.model || undefined,
         effort: body.effort || undefined, timeoutMs: Math.min(Number(body.timeoutMs) || 20 * 60_000, 60 * 60_000),
-        cwd: ws, todo: body.todo || undefined, signal: abort.signal,
+        cwd: ws, todo: body.todo || undefined, signal: abort.signal, attachments: body.attachments || [],
         onEvent: (ev) => {
           const event = { ...ev, detail: hidePath(ev.detail, ws) };
           if (event.type === 'tool') call.tool(event);

@@ -323,3 +323,27 @@ test('folder browsing lists subfolders only, and --lock-dir pins the folder', as
     assert.equal(locked.status, 403);
   } finally { await srv.close(); }
 });
+
+test('attachments over HTTP: upload, list, fetch, delete', () => withServer(async ({ port, cwd }) => {
+  const h = { 'X-Agentci': '1' };
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  const up = await request(port, 'POST', '/api/attachments', { body: { name: 'shot.png', data: png.toString('base64') }, headers: h });
+  assert.equal(up.status, 200, up.text);
+  assert.equal(up.json.kind, 'image');
+  assert.ok(fs.existsSync(path.join(cwd, up.json.path)), 'stored inside the project');
+
+  const list = (await request(port, 'GET', '/api/attachments')).json;
+  assert.deepEqual(list.map((a) => a.name), ['shot.png']);
+
+  const raw = await request(port, 'GET', `/api/attachments/${encodeURIComponent(up.json.id)}`);
+  assert.equal(raw.status, 200);
+  assert.match(raw.type, /image\/png/);
+
+  assert.equal((await request(port, 'POST', '/api/attachments', { body: { name: 'x' }, headers: h })).status, 400);
+  assert.equal((await request(port, 'GET', '/api/attachments/does-not-exist')).status, 404);
+
+  const del = await request(port, 'DELETE', `/api/attachments/${encodeURIComponent(up.json.id)}`, { headers: h });
+  assert.equal(del.status, 200);
+  assert.deepEqual(del.json.attachments, []);
+  assert.equal((await request(port, 'DELETE', `/api/attachments/${encodeURIComponent(up.json.id)}`)).status, 403, 'needs the CSRF header');
+}));

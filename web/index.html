@@ -74,8 +74,13 @@
           <form id="composeForm" class="composer">
             <div class="task-box">
               <textarea id="task" rows="4" placeholder="e.g. Build a REST API for todos with Express, validation and tests" required></textarea>
+              <div class="attachments" id="attachments"></div>
               <div class="task-foot">
-                <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> starts</span>
+                <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> starts · <kbd>Ctrl</kbd> + <kbd>V</kbd> pastes a screenshot</span>
+                <input type="file" id="fileInput" multiple hidden>
+                <button type="button" class="btn btn-ghost btn-sm" id="attachBtn" title="Attach files">
+                  <svg viewBox="0 0 24 24"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 6"/></svg>Attach
+                </button>
                 <div class="task-actions">
                   <button type="button" class="btn btn-ghost" id="planBtn">Plan only</button>
                   <button type="submit" class="btn btn-primary" id="runBtn">
@@ -117,6 +122,7 @@
             <div class="eyebrow" id="runEyebrow"></div>
             <h1 id="runTask"></h1>
             <p class="run-summary" id="runSummary"></p>
+            <div class="att-list" id="runAtts"></div>
           </div>
           <div class="run-actions" id="runActions"></div>
         </div>

@@ -242,3 +242,25 @@ test('monitor: workspace size separates the mirror from what agents installed th
     },
   },
 }));
+
+test('gateway: attachments are shipped even though .agentci is ignored', () => withGateway(async ({ url, dataDir }) => {
+  const cwd = tmp();
+  fs.writeFileSync(path.join(cwd, 'app.js'), 'x');
+  const { saveAttachment } = await import('../src/attachments.js');
+  const shot = saveAttachment(cwd, 'shot.png', Buffer.from('89504e470d0a1a0a', 'hex'));
+  let seenOnGateway = null;
+  await withGateway(async ({ url: u, dataDir: dir }) => {
+    const p = remoteProvider({ url: u, token: TOKEN, target: 'peek', ignore: ['.agentci', 'node_modules'] });
+    await p.run({ prompt: 'x', cwd, canEdit: true, timeoutMs: 10_000, attachments: [shot] });
+    const ws = path.join(dir, 'workspaces', sessionId(cwd), 'edit');
+    assert.ok(fs.existsSync(path.join(ws, shot.path)), 'the attachment reached the gateway workspace');
+    assert.deepEqual(seenOnGateway, ['shot.png'], 'and the provider there got it as data');
+  }, {
+    peek: {
+      async run({ attachments }) {
+        seenOnGateway = (attachments || []).map((a) => a.name);
+        return { text: 'ok' };
+      },
+    },
+  });
+}));

@@ -11,8 +11,10 @@ import { loadGatewaySettings, saveGatewaySettings, publicGatewaySettings, normal
 import { Orchestrator, publicState } from './orchestrator.js';
 import { serveStatic } from './static.js';
 import { createCodeMapCache, graphData } from './codemap.js';
+import { saveAttachment, listAttachments, readAttachment, deleteAttachment, MAX_ATTACHMENT_BYTES } from './attachments.js';
 
 const MAX_BODY = 1024 * 1024;
+const MAX_UPLOAD = MAX_ATTACHMENT_BYTES + 1024 * 1024; // base64 overhead
 
 // Local web UI. Binds to 127.0.0.1 only. Every mutating request must carry the X-Agentci header
 // (forces a CORS preflight that we never answer) and a localhost Host header (DNS-rebinding guard),
@@ -100,6 +102,12 @@ export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', t
       state: current?.state ? publicState(current.state) : readLatestState(cwd),
     }),
     'GET /api/runs': () => listRuns(cwd),
+    // Attachments: pasted screenshots, specs, logs – the agents read them from the project.
+    'GET /api/attachments': () => listAttachments(cwd),
+    'POST /api/attachments': (b) => {
+      if (!b?.name || typeof b.data !== 'string') throw httpError(400, 'name and data required');
+      return saveAttachment(cwd, b.name, Buffer.from(b.data, 'base64'));
+    },
     // Switching the project folder – that is where .agentci (history, plan, config) lives.
     'POST /api/cwd': (b) => {
       if (lockDir) throw httpError(403, 'the folder is fixed for this server (--lock-dir)');
@@ -186,6 +194,17 @@ export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', t
       if (req.method === 'GET' && url.pathname === '/api/browse') {
         return json(res, 200, browseFolder(url.searchParams.get('path') || cwd));
       }
+      const attRaw = url.pathname.match(/^\/api\/attachments\/(.+)$/);
+      if (attRaw && req.method === 'GET') {
+        const { buffer, entry } = readAttachment(cwd, decodeURIComponent(attRaw[1]));
+        res.writeHead(200, { 'Content-Type': mimeFor(entry.name), 'Content-Length': buffer.length, 'Cache-Control': 'private, max-age=300' });
+        return res.end(buffer);
+      }
+      if (attRaw && req.method === 'DELETE') {
+        if (req.headers['x-agentci'] !== '1') throw httpError(403, 'missing X-Agentci header');
+        deleteAttachment(cwd, decodeURIComponent(attRaw[1]));
+        return json(res, 200, { ok: true, attachments: listAttachments(cwd) });
+      }
       const runMatch = url.pathname.match(/^\/api\/runs\/([\w-]+)$/);
       if (req.method === 'GET' && runMatch) return json(res, 200, readRun(cwd, runMatch[1]));
       const diffMatch = url.pathname.match(/^\/api\/runs\/([\w-]+)\/diff\/([^/]+)$/);
@@ -194,7 +213,7 @@ export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', t
       const route = routes[`${req.method} ${url.pathname}`];
       if (route) {
         if (req.method !== 'GET' && req.headers['x-agentci'] !== '1') throw httpError(403, 'missing X-Agentci header');
-        const body = req.method === 'GET' ? null : await readBody(req);
+        const body = req.method === 'GET' ? null : await readBody(req, url.pathname === '/api/attachments' ? MAX_UPLOAD : MAX_BODY);
         return json(res, 200, await route(body));
       }
       if (req.method === 'GET') return serveStatic(url.pathname, res);
@@ -255,17 +274,24 @@ export function hostAllowed(hostHeader = '', localOnly = true, bindHost = '127.0
   return own.includes(name) || name === os.hostname() || /^[\w.-]+$/.test(name);
 }
 
+const MIME = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.svg': 'image/svg+xml', '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8',
+};
+const mimeFor = (name) => MIME[path.extname(name).toLowerCase()] || 'application/octet-stream';
+
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
 }
 
-function readBody(req) {
+function readBody(req, max = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(httpError(413, 'request too large')); req.destroy(); return; }
+      if (size > max) { reject(httpError(413, 'request too large')); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => {

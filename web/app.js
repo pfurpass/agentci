@@ -66,6 +66,7 @@ const app = {
   openTodos: new Set(),
   editing: null,        // todo id being edited
   form: { roles: {}, writeTests: true, fixAttempts: 3 },
+  attachments: [],
 };
 
 // ---------------- api ----------------
@@ -379,6 +380,8 @@ function renderRun() {
   $('#runEyebrow').innerHTML = s ? `${esc(label)} · ${new Date(s.startedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}${s.gateway ? ` · <span class="gw-badge" title="${esc(s.gateway)}">⇄ via gateway</span>` : ''}` : 'Starting…';
   $('#runTask').textContent = s?.task || $('#task').value.trim() || '…';
   $('#runSummary').textContent = s?.summary || '';
+  const atts = s?.attachments || [];
+  $('#runAtts').innerHTML = atts.map((a) => `<a class="att-chip" href="/api/attachments/${encodeURIComponent(a.id)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ''}" target="_blank" rel="noopener">${icon(a.kind === 'image' ? '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15l5-4 4 3 3-2 6 5"/>' : ICON_DOC)}${esc(a.name)}</a>`).join('');
   $('#runSummary').hidden = !s?.summary;
   if (s?.error && s.phase === 'error') $('#runSummary').innerHTML = `<span style="color:var(--danger)">${esc(s.error)}</span>`, $('#runSummary').hidden = false;
 
@@ -819,6 +822,78 @@ function bindRunView() {
   });
 }
 
+// ---------------- attachments ----------------
+// Screenshots pasted with Ctrl+V, dropped files or picked ones. They are stored in the
+// project (.agentci/attachments) and every agent gets their paths in its prompt.
+const ICON_DOC = '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/>';
+
+function fmtBytes(n) {
+  return n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`;
+}
+
+function renderAttachments() {
+  const list = app.attachments || [];
+  $('#attachments').innerHTML = list.map((a) => `
+    <div class="att${a.pending ? ' uploading' : ''}" title="${esc(a.path || a.name)}">
+      ${a.kind === 'image' && a.id ? `<img src="/api/attachments/${encodeURIComponent(a.id)}${authToken ? `?token=${encodeURIComponent(authToken)}` : ''}" alt="">` : `<span class="ic">${icon(ICON_DOC)}</span>`}
+      <span class="meta"><span class="n">${esc(a.name)}</span><span class="s">${a.pending ? 'uploading…' : fmtBytes(a.bytes)}</span></span>
+      ${a.id ? `<button type="button" data-drop-att="${esc(a.id)}" title="Remove">${icon(ICONS.x)}</button>` : ''}
+    </div>`).join('');
+}
+
+async function uploadFiles(files) {
+  for (const file of files) {
+    if (!file) continue;
+    const placeholder = { name: file.name || 'screenshot.png', bytes: file.size, kind: file.type.startsWith('image/') ? 'image' : 'file', pending: true };
+    app.attachments.push(placeholder);
+    renderAttachments();
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1]);
+        r.onerror = () => reject(new Error('could not read the file'));
+        r.readAsDataURL(file);
+      });
+      const saved = await api('POST', '/api/attachments', { name: placeholder.name, data });
+      Object.assign(placeholder, saved, { pending: false });
+    } catch (e) {
+      app.attachments = app.attachments.filter((a) => a !== placeholder);
+      toast(`${placeholder.name}: ${e.message}`, 'error');
+    }
+    renderAttachments();
+  }
+}
+
+function bindAttachments() {
+  const box = $('.task-box');
+  $('#attachBtn').onclick = () => $('#fileInput').click();
+  $('#fileInput').addEventListener('change', (e) => { uploadFiles([...e.target.files]); e.target.value = ''; });
+  $('#task').addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.items || [])]
+      .filter((i) => i.kind === 'file')
+      .map((i, n) => {
+        const f = i.getAsFile();
+        if (!f) return null;
+        // clipboard screenshots arrive without a name
+        return f.name && f.name !== 'image.png' ? f : new File([f], `screenshot-${Date.now()}${n || ''}.png`, { type: f.type });
+      })
+      .filter(Boolean);
+    if (files.length) { e.preventDefault(); uploadFiles(files); }
+  });
+  for (const ev of ['dragenter', 'dragover']) box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.add('dragover'); });
+  for (const ev of ['dragleave', 'drop']) box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.remove('dragover'); });
+  box.addEventListener('drop', (e) => { if (e.dataTransfer?.files?.length) uploadFiles([...e.dataTransfer.files]); });
+  $('#attachments').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-drop-att]');
+    if (!b) return;
+    try {
+      const res = await api('DELETE', `/api/attachments/${encodeURIComponent(b.dataset.dropAtt)}`);
+      app.attachments = res.attachments;
+      renderAttachments();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
 // ---------------- folder switcher ----------------
 // The working folder decides which history, plan and config the UI shows,
 // so it can be switched from the top bar.
@@ -885,6 +960,8 @@ function setFolderChip(dir) {
 }
 
 async function reloadForFolder() {
+  app.attachments = await api('GET', '/api/attachments').catch(() => []);
+  renderAttachments();
   graph.data = null;
   graph.collapsedInit = false;
   graph.collapsed.clear();
@@ -961,6 +1038,7 @@ async function boot() {
   bindRunView();
   bindGraph();
   bindFolder();
+  bindAttachments();
   try {
     app.status = await api('GET', '/api/status');
   } catch (e) {
@@ -973,6 +1051,8 @@ async function boot() {
   initForm();
   renderGateway();
   bindGateway();
+  app.attachments = await api('GET', '/api/attachments').catch(() => []);
+  renderAttachments();
   await refreshRuns();
   showView();
   connect();

@@ -15,6 +15,7 @@ import { runChecks } from '../src/checker.js';
 import { TerminalRenderer, renderTodoList, st as color, badge } from '../src/term.js';
 import { createServer } from '../src/server.js';
 import { packBundle, serveBundle, humanSize } from '../src/bundle.js';
+import { attachFromDisk, listAttachments } from '../src/attachments.js';
 import { installService, removeService, serviceStatus, unitText } from '../src/gateway/service.js';
 
 const header = (title) => console.log(`\n${color.bold(title)}\n${color.faint('─'.repeat(Math.min(60, title.length + 8)))}`);
@@ -58,6 +59,8 @@ ${color.bold('Options')}
   --lock-dir                  for "ui": do not allow switching the project folder
   --serve                     for "bundle": offer it for download on the network
   --dir <path>                for "bundle": target folder for the package
+  --attach <file>             for "run"/"plan": give the team a screenshot, spec or log
+                              (repeatable; stored in .agentci/attachments)
   --local                     Ignore the gateway for this run (claude/codex run locally)
   --token / --host / --cert / --key   Options for agentci gateway
 
@@ -78,6 +81,7 @@ function parseArgs(argv) {
     else if (a === '--no-ui') out.noUi = true;
     else if (a === '--serve') out.serve = true;
     else if (a === '--lock-dir') out.lockDir = true;
+    else if (a === '--attach') out.attach = [...(out.attach || []), argv[++i]];
     else if (a === '--allow-host') out.allowHost = [...(out.allowHost || []), ...String(argv[++i] || '').split(',').map((h) => h.trim()).filter(Boolean)];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--local') out.local = true;
@@ -387,8 +391,8 @@ async function demo(args) {
 // Which options make sense for which command – a typo should not be swallowed silently.
 const FLAGS = {
   common: ['dir', 'help'],
-  run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
-  plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
+  run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach'],
+  plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach'],
   resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
   ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost', 'lockDir'],
   gateway: ['port', 'host', 'token', 'cert', 'key', 'noUi', 'dryRun'],
@@ -398,7 +402,7 @@ const FLAGS = {
 };
 const FLAG_NAMES = {
   port: '--port', host: '--host', token: '--token', cert: '--cert', key: '--key', noOpen: '--no-open',
-  noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', lockDir: '--lock-dir', local: '--local', noReview: '--no-review', noTests: '--no-tests',
+  noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', lockDir: '--lock-dir', attach: '--attach', local: '--local', noReview: '--no-review', noTests: '--no-tests',
   docs: '--docs', fixAttempts: '--fix-attempts', dryRun: '--dry-run', roles: '--planner/--coder/…', dirOut: '--dir',
 };
 
@@ -428,6 +432,10 @@ async function main() {
     case 'run': case 'plan': {
       const task = rest.join(' ').trim();
       if (!task) throw new Error(`please provide a task: agentci ${cmd} "Build ..."`);
+      for (const file of args.attach || []) {
+        const a = attachFromDisk(cwd, file);
+        console.log(`${color.green('✔')} attached ${color.bold(a.name)} ${color.gray(`(${a.kind}, ${a.path})`)}`);
+      }
       const orch = await makeOrchestrator(cwd, args);
       if (cmd === 'plan') {
         await runWithTerminal(orch, (o) => o.plan(task));

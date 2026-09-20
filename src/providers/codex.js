@@ -8,12 +8,14 @@ import { runProcess, extractJson } from './proc.js';
 export function codexProvider({ bin = 'codex', permissions = {} } = {}) {
   return {
     name: 'codex',
-    async run({ prompt, systemPrompt, cwd, model, effort, schema, canEdit, timeoutMs, onEvent, signal }) {
+    async run({ prompt, systemPrompt, cwd, model, effort, schema, canEdit, timeoutMs, onEvent, signal, attachments = [] }) {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentci-codex-'));
       const lastFile = path.join(tmp, 'last.txt');
       const args = ['exec', '--json', '--skip-git-repo-check', '-C', cwd, '-o', lastFile,
         '-s', canEdit ? (permissions.codexSandbox || 'workspace-write') : 'read-only'];
       if (model) args.push('-m', model);
+      // Codex takes images directly; other attachments are referenced by path in the prompt.
+      for (const img of attachments.filter((a) => a.kind === 'image')) args.push('-i', path.resolve(cwd, img.path));
       if (effort) args.push('-c', `model_reasoning_effort="${mapEffort(effort)}"`);
       if (schema) {
         const schemaFile = path.join(tmp, 'schema.json');

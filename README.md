@@ -176,6 +176,16 @@ location / {
 }
 ```
 
+### Attachments: paste a screenshot, drop a spec
+
+Press <kbd>Ctrl</kbd>+<kbd>V</kbd> in the task field to paste a screenshot, drag files onto it, or use **Attach**. The files are stored in the project under `.agentci/attachments/` and **every agent gets their paths in its prompt**, so the planner, coder, reviewer and tester can open them. Codex additionally receives images as real image input; Claude reads them with its own Read tool (images and PDFs included).
+
+```bash
+agentci run --attach design.png --attach spec.md "Rebuild the settings page to match the design"
+```
+
+Verified with a real run: a screenshot pasted into the UI was opened by the coder (`Read .agentci/attachments/…png`) and described down to the individual buttons. Attachments also travel to a gateway, even though `.agentci/` is otherwise never synced, and they never show up as changes made by an agent.
+
 ### Project map instead of searching (saves tokens)
 
 agentci parses your project itself – **without an LLM** – and ships a compact map in every prompt:
@@ -285,7 +295,7 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
 ## Development
 
 ```bash
-npm test          # 70 tests, no dependencies, no AI calls
+npm test          # 77 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 
