@@ -1,0 +1,6 @@
+node_modules/
+.agentci/
+*.tgz
+install-agentci.sh
+.DS_Store
+*.log

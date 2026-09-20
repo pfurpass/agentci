@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agentci gateway</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="gw-body">
+  <header class="topbar">
+    <a class="brand" href="/"><img src="/logo.svg" alt="" width="26" height="26"><span>agentci <span class="brand-sub">gateway</span></span></a>
+    <span class="workspace mono" id="hostChip" hidden></span>
+    <div class="topbar-spacer"></div>
+    <div class="live-meta" id="meta" hidden>
+      <span class="meta-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="uptime">–</span></span>
+    </div>
+    <span class="status-pill" id="pill"><i></i><span>connecting…</span></span>
+    <button class="icon-btn" id="logout" title="Forget token" hidden><svg viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/></svg></button>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle colour scheme"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+  </header>
+
+  <main class="gw-main" id="main" hidden>
+    <div class="kpis" id="kpis"></div>
+    <div class="gw-grid">
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>Running now</h2><span class="muted" id="activeCount"></span></div>
+          <div id="active" class="active-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Recent calls</h2><span class="muted" id="recentCount"></span></div>
+          <div id="recent" class="calls"></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="panel-head"><h2>This machine</h2><button class="btn btn-sm btn-ghost" id="refreshHealth">Re-check</button></div>
+          <div id="health" class="health"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Clients</h2><span class="muted" id="clientCount"></span></div>
+          <div id="clients" class="clients"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Workspaces</h2><span class="muted" id="wsTotal"></span></div>
+          <div id="workspaces" class="workspaces"></div>
+        </div>
+        <div class="panel feed-panel">
+          <div class="panel-head"><h2>Events</h2><label class="toggle-sm"><input type="checkbox" id="followLog" checked><span>Auto-scroll</span></label></div>
+          <div id="log" class="gw-log"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="gate" id="gate" hidden>
+    <form class="gate-card" id="gateForm">
+      <img src="/logo.svg" alt="" width="46" height="46">
+      <h1>Gateway monitor</h1>
+      <p class="muted">Enter the token – it is printed in the terminal when <code>agentci gateway</code> starts.</p>
+      <input type="password" id="tokenInput" placeholder="Token" autocomplete="off" autofocus>
+      <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+      <div class="gate-error" id="gateError" hidden></div>
+    </form>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script type="module" src="/gateway.js"></script>
+</body>
+</html>

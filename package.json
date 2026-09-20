@@ -1,0 +1,48 @@
+{
+  "name": "agentci",
+  "version": "0.2.0",
+  "description": "Multi-agent AI coding orchestrator: planner, coder, checker, reviewer and tester – driven by your Claude and ChatGPT subscriptions, with an optional gateway for machines without internet.",
+  "type": "module",
+  "bin": {
+    "agentci": "bin/agentci.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "files": [
+    "bin",
+    "src",
+    "web",
+    "scripts",
+    "install.sh",
+    "install-gateway.sh",
+    "README.md"
+  ],
+  "keywords": [
+    "ai",
+    "agents",
+    "multi-agent",
+    "claude",
+    "claude-code",
+    "codex",
+    "chatgpt",
+    "coding-agent",
+    "automation",
+    "cli",
+    "code-review",
+    "testing"
+  ],
+  "author": "Phillip",
+  "homepage": "https://github.com/USER/agentci#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/USER/agentci.git"
+  },
+  "bugs": {
+    "url": "https://github.com/USER/agentci/issues"
+  }
+}

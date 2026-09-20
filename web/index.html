@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agentci</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="menuBtn" aria-label="Open history">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <a class="brand" href="#" id="brand">
+        <img src="/logo.svg" alt="" width="26" height="26">
+        <span>agentci</span>
+      </a>
+      <span class="workspace mono" id="workspace" title="Working directory"></span>
+      <div class="topbar-spacer"></div>
+      <div class="live-meta" id="liveMeta" hidden>
+        <span class="meta-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="metaTime">0:00</span></span>
+        <span class="meta-item" id="metaCostWrap" hidden><svg viewBox="0 0 24 24"><path d="M12 3v18M17 7.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.7 5 3.4 5 1.6 5 3.6-2.2 3-5 3-5-1.1-5-3"/></svg><span id="metaCost"></span></span>
+      </div>
+      <span class="status-pill" id="statusPill"><i></i><span>Ready</span></span>
+      <button class="btn btn-danger" id="stopBtn" hidden>
+        <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop
+      </button>
+      <button class="icon-btn" id="themeBtn" aria-label="Toggle colour scheme">
+        <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </header>
+
+    <aside class="sidebar" id="sidebar">
+      <button class="btn btn-primary btn-block" id="newBtn">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New job
+      </button>
+      <button class="btn btn-ghost btn-block" id="graphBtn">
+        <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.7 7.6L11 15.6M16.3 7.6L13 15.6M8.5 6h7"/></svg>Project map
+      </button>
+      <div class="sidebar-title">History</div>
+      <nav class="runs" id="runs"></nav>
+      <div class="providers" id="providers"></div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <main class="main" id="main">
+      <!-- compose view -->
+      <section class="view compose" id="composeView">
+        <div class="compose-inner">
+          <div class="hero">
+            <div class="hero-mark"><img src="/logo.svg" alt="" width="44" height="44"></div>
+            <h1>What should your team build?</h1>
+            <p>A planner splits the task, the coder implements it, the checker verifies syntax and tests, reviewer and tester work in parallel.</p>
+          </div>
+
+          <form id="composeForm" class="composer">
+            <div class="task-box">
+              <textarea id="task" rows="4" placeholder="e.g. Build a REST API for todos with Express, validation and tests" required></textarea>
+              <div class="task-foot">
+                <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> starts</span>
+                <div class="task-actions">
+                  <button type="button" class="btn btn-ghost" id="planBtn">Plan only</button>
+                  <button type="submit" class="btn btn-primary" id="runBtn">
+                    <svg viewBox="0 0 24 24"><path d="M7 5l11 7-11 7z"/></svg>Plan &amp; build
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-head">
+              <h2>Your team</h2>
+              <span class="muted" id="teamNote">Every role can use a different AI</span>
+            </div>
+            <div class="team-grid" id="teamGrid"></div>
+
+            <div class="section-head">
+              <h2>Gateway</h2>
+              <span class="muted">For networks without internet: Claude &amp; Codex run on another machine</span>
+            </div>
+            <div class="gateway-card" id="gatewayCard"></div>
+
+            <div class="options">
+              <label class="stepper">
+                <span>Fix attempts</span>
+                <button type="button" data-step="-1" aria-label="fewer">−</button>
+                <output id="fixAttempts">3</output>
+                <button type="button" data-step="1" aria-label="more">+</button>
+              </label>
+              <button type="button" class="btn btn-ghost btn-sm" id="saveDefaultsBtn">Save as default</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- run view -->
+      <section class="view run" id="runView" hidden>
+        <div class="run-head">
+          <div class="run-title">
+            <div class="eyebrow" id="runEyebrow"></div>
+            <h1 id="runTask"></h1>
+            <p class="run-summary" id="runSummary"></p>
+          </div>
+          <div class="run-actions" id="runActions"></div>
+        </div>
+        <div class="progress" id="progress"></div>
+
+        <div class="run-grid">
+          <div class="col">
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Todos</h2>
+                <span class="muted" id="todoCount"></span>
+              </div>
+              <div class="todos" id="todos"></div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="panel">
+              <div class="panel-head"><h2>Team</h2><span class="muted" id="teamActive"></span></div>
+              <div class="lanes" id="lanes"></div>
+            </div>
+            <div class="panel feed-panel">
+              <div class="panel-head">
+                <h2>Activity</h2>
+                <label class="toggle-sm"><input type="checkbox" id="followFeed" checked><span>Auto-scroll</span></label>
+              </div>
+              <div class="feed" id="feed"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- graph view -->
+      <section class="view graph" id="graphView" hidden>
+        <div class="graph-head">
+          <div>
+            <div class="eyebrow">Analysed by agentci · no AI</div>
+            <h1>Project map</h1>
+            <p class="run-summary" id="graphStats"></p>
+          </div>
+          <div class="graph-actions">
+            <input class="model-input graph-search" id="graphSearch" placeholder="Find file…" aria-label="Find file">
+            <label class="toggle-sm"><input type="checkbox" id="graphHideTests"><span>Hide tests</span></label>
+            <label class="toggle-sm"><input type="checkbox" id="graphOnlySel"><span>Selected edges only</span></label>
+            <button class="btn btn-ghost btn-sm" id="graphFit">Fit</button>
+            <button class="btn btn-ghost btn-sm" id="graphReload">Rescan</button>
+          </div>
+        </div>
+        <div class="graph-wrap panel">
+          <svg id="graphSvg" role="img" aria-label="Dependency graph of the project files"></svg>
+          <div class="graph-legend" id="graphLegend"></div>
+          <div class="graph-tip" id="graphTip" hidden></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- diff drawer -->
+  <div class="drawer-scrim" id="drawerScrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <div>
+        <div class="eyebrow" id="drawerEyebrow"></div>
+        <h2 id="drawerTitle">Changes</h2>
+      </div>
+      <button class="icon-btn" id="drawerClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="file-tabs" id="fileTabs"></div>
+    <div class="diff mono" id="diffBody"></div>
+  </aside>
+
+  <div class="gate" id="gate" hidden>
+    <form class="gate-card" id="gateForm">
+      <img src="/logo.svg" alt="" width="46" height="46">
+      <h1>agentci</h1>
+      <p class="muted">This interface is reachable over the network and therefore protected by a token. It is printed when you start <code>agentci ui --host …</code>.</p>
+      <input type="password" id="tokenInput" placeholder="Token" autocomplete="off">
+      <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+      <div class="gate-error" id="gateError" hidden></div>
+    </form>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
