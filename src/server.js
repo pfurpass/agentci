@@ -17,7 +17,10 @@ const MAX_BODY = 1024 * 1024;
 // Local web UI. Binds to 127.0.0.1 only. Every mutating request must carry the X-Agentci header
 // (forces a CORS preflight that we never answer) and a localhost Host header (DNS-rebinding guard),
 // so other websites open in your browser can't start agents on your machine.
-export function createServer({ cwd, port = 4317, host = '127.0.0.1', token = null, allowedHosts = [], onOrchestrator, gateway: gatewayOverride } = {}) {
+export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', token = null, allowedHosts = [], lockDir = false, onOrchestrator, gateway: gatewayOverride } = {}) {
+  // The working folder can be switched from the UI (history and config live inside it),
+  // so it is a variable, not a constant.
+  let cwd = path.resolve(startCwd);
   // Reachable from outside this machine – directly via --host, or through a reverse proxy
   // that forwards a public name (--allow-host). Both need a token: without one, anyone who
   // can reach the port could start agents that write files and run commands.
@@ -38,7 +41,8 @@ export function createServer({ cwd, port = 4317, host = '127.0.0.1', token = nul
   let buffer = [];          // events of the current/last run, replayed to new clients
   let starting = false;
   const providersInfo = detectProviders();
-  const codeMapCache = createCodeMapCache();
+  let codeMapCache = createCodeMapCache();
+  rememberFolder(cwd); // so you can always switch back to where you started
   // Tests (and embedders) can inject gateway settings instead of reading ~/.config/agentci.
   const gatewaySettings = () => gatewayOverride ?? loadGatewaySettings();
 
@@ -91,10 +95,22 @@ export function createServer({ cwd, port = 4317, host = '127.0.0.1', token = nul
   const routes = {
     'GET /api/status': async () => ({
       cwd, busy: Boolean(current), providers: providersInfo, gateway: await gatewayInfo(),
+      recentFolders: recentFolders(cwd), canSwitchFolder: !lockDir,
       config: loadConfig(cwd), hasConfigFile: fs.existsSync(path.join(cwd, CONFIG_FILE)),
       state: current?.state ? publicState(current.state) : readLatestState(cwd),
     }),
     'GET /api/runs': () => listRuns(cwd),
+    // Switching the project folder – that is where .agentci (history, plan, config) lives.
+    'POST /api/cwd': (b) => {
+      if (lockDir) throw httpError(403, 'the folder is fixed for this server (--lock-dir)');
+      if (current) throw httpError(409, 'not possible while a run is in progress');
+      const next = resolveFolder(b?.path, cwd);
+      cwd = next;
+      codeMapCache = createCodeMapCache();
+      rememberFolder(cwd);
+      broadcast({ type: 'cwd', cwd, t: Date.now() });
+      return { cwd, recentFolders: recentFolders(cwd) };
+    },
     'GET /api/file': () => { throw httpError(400, 'path missing'); },
     // The dependency graph is computed here, not by an AI – same map the agents get in their prompts.
     'GET /api/codemap': () => {
@@ -166,6 +182,9 @@ export function createServer({ cwd, port = 4317, host = '127.0.0.1', token = nul
       if (req.method === 'GET' && url.pathname === '/api/events') return sse(req, res);
       if (req.method === 'GET' && url.pathname === '/api/file' && url.searchParams.get('path')) {
         return json(res, 200, readProjectFile(cwd, url.searchParams.get('path')));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/browse') {
+        return json(res, 200, browseFolder(url.searchParams.get('path') || cwd));
       }
       const runMatch = url.pathname.match(/^\/api\/runs\/([\w-]+)$/);
       if (req.method === 'GET' && runMatch) return json(res, 200, readRun(cwd, runMatch[1]));
@@ -276,6 +295,55 @@ export function buildConfig(cwd, body = {}) {
 }
 
 const MAX_FILE_VIEW = 400 * 1024;
+const RECENT_FILE = () => path.join(process.env.AGENTCI_HOME || path.join(os.homedir(), '.config', 'agentci'), 'recent-folders.json');
+const MAX_RECENT = 12;
+
+// Lists subfolders so the UI can offer a simple picker. Never returns file contents.
+export function browseFolder(dir) {
+  const full = path.resolve(dir.replace(/^~(?=$|\/)/, os.homedir()));
+  if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) throw httpError(404, `no such folder: ${full}`);
+  let entries = [];
+  try {
+    entries = fs.readdirSync(full, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name).sort().slice(0, 500);
+  } catch { throw httpError(403, `cannot read folder: ${full}`); }
+  return {
+    path: full,
+    parent: path.dirname(full) === full ? null : path.dirname(full),
+    folders: entries,
+    isProject: fs.existsSync(path.join(full, '.agentci')),
+  };
+}
+
+export function resolveFolder(input, fallback) {
+  if (!input || typeof input !== 'string') throw httpError(400, 'path missing');
+  const full = path.resolve(fallback, input.replace(/^~(?=$|\/)/, os.homedir()));
+  if (!fs.existsSync(full)) throw httpError(404, `no such folder: ${full}`);
+  if (!fs.statSync(full).isDirectory()) throw httpError(400, `not a folder: ${full}`);
+  try { fs.accessSync(full, fs.constants.R_OK | fs.constants.W_OK); } catch { throw httpError(403, `no write access: ${full}`); }
+  return full;
+}
+
+// Recently used folders, plus every folder that already has agentci history.
+export function recentFolders(current) {
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(RECENT_FILE(), 'utf8')); } catch { /* none yet */ }
+  const all = [current, ...list.filter((p) => p !== current)];
+  return all.filter((p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } })
+    .slice(0, MAX_RECENT)
+    .map((p) => ({ path: p, name: path.basename(p) || p, hasHistory: fs.existsSync(path.join(p, '.agentci', 'runs')) }));
+}
+
+export function rememberFolder(dir) {
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(RECENT_FILE(), 'utf8')); } catch { /* none yet */ }
+  const next = [dir, ...list.filter((p) => p !== dir)].slice(0, MAX_RECENT);
+  try {
+    fs.mkdirSync(path.dirname(RECENT_FILE()), { recursive: true });
+    fs.writeFileSync(RECENT_FILE(), JSON.stringify(next, null, 2));
+  } catch { /* not fatal */ }
+}
 
 // Serves one project file to the UI's code viewer – never outside the project.
 function readProjectFile(cwd, rel) {

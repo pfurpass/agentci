@@ -256,3 +256,70 @@ test('reverse proxy: --allow-host accepts that Host header and demands a token',
     assert.equal((await request(port, 'GET', '/api/status', { headers: auth })).status, 200, 'localhost keeps working');
   } finally { await srv.close(); }
 });
+
+test('folder switching: history follows the folder, and it is blocked while busy', async () => {
+  const home = tmp();
+  const a = tmp();
+  const b = tmp();
+  // folder b already has a finished run
+  fs.mkdirSync(path.join(b, '.agentci', 'runs'), { recursive: true });
+  const old = { runId: 'r9', task: 'older work', phase: 'finished', startedAt: Date.now() - 5000, costUsd: 0, todos: [{ id: 'T1', title: 'x', status: 'done', notes: [], dependsOn: [] }] };
+  fs.writeFileSync(path.join(b, '.agentci', 'runs', 'r9.state.json'), JSON.stringify(old));
+  fs.writeFileSync(path.join(b, '.agentci', 'state.json'), JSON.stringify(old));
+
+  const prevHome = process.env.AGENTCI_HOME;
+  process.env.AGENTCI_HOME = home;
+  const srv = createServer({ cwd: a, port: 0 });
+  const port = await srv.listen();
+  const h = { 'X-Agentci': '1' };
+  try {
+    assert.equal((await request(port, 'GET', '/api/status')).json.cwd, a);
+    assert.deepEqual((await request(port, 'GET', '/api/runs')).json, []);
+
+    const switched = await request(port, 'PUT', '/api/cwd', { body: { path: b }, headers: h });
+    assert.equal(switched.status, 404, 'only POST switches');
+    const res = await request(port, 'POST', '/api/cwd', { body: { path: b }, headers: h });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.json.cwd, b);
+
+    const status = (await request(port, 'GET', '/api/status')).json;
+    assert.equal(status.cwd, b);
+    assert.equal(status.state.task, 'older work', 'the plan of the new folder is loaded');
+    assert.equal((await request(port, 'GET', '/api/runs')).json[0].task, 'older work', 'its history is back');
+    assert.deepEqual(status.recentFolders.map((f) => f.path), [b, a], 'recent folders are remembered');
+    assert.equal(status.recentFolders[0].hasHistory, true);
+
+    // bad targets
+    assert.equal((await request(port, 'POST', '/api/cwd', { body: { path: path.join(b, 'nope') }, headers: h })).status, 404);
+    fs.writeFileSync(path.join(b, 'file.txt'), 'x');
+    assert.equal((await request(port, 'POST', '/api/cwd', { body: { path: path.join(b, 'file.txt') }, headers: h })).status, 400);
+    assert.equal((await request(port, 'POST', '/api/cwd', { body: {} , headers: h })).status, 400);
+
+    // busy: a run in the old folder must not be pulled out from under itself
+    await request(port, 'POST', '/api/run', { body: { task: 'demo', roles: MOCK_ROLES }, headers: h });
+    const whileBusy = await request(port, 'POST', '/api/cwd', { body: { path: a }, headers: h });
+    assert.equal(whileBusy.status, 409);
+    for (let i = 0; i < 200 && (await request(port, 'GET', '/api/status')).json.busy; i++) await new Promise((r) => setTimeout(r, 50));
+  } finally {
+    await srv.close();
+    if (prevHome === undefined) delete process.env.AGENTCI_HOME; else process.env.AGENTCI_HOME = prevHome;
+  }
+});
+
+test('folder browsing lists subfolders only, and --lock-dir pins the folder', async () => {
+  const root = tmp();
+  fs.mkdirSync(path.join(root, 'src'));
+  fs.mkdirSync(path.join(root, '.hidden'));
+  fs.writeFileSync(path.join(root, 'file.txt'), 'x');
+  const srv = createServer({ cwd: root, port: 0, lockDir: true });
+  const port = await srv.listen();
+  try {
+    const d = (await request(port, 'GET', `/api/browse?path=${encodeURIComponent(root)}`)).json;
+    assert.deepEqual(d.folders, ['src'], 'files and dotfolders are not listed');
+    assert.equal(d.parent, path.dirname(root));
+    assert.equal((await request(port, 'GET', '/api/browse?path=/does/not/exist')).status, 404);
+    assert.equal((await request(port, 'GET', '/api/status')).json.canSwitchFolder, false);
+    const locked = await request(port, 'POST', '/api/cwd', { body: { path: path.join(root, 'src') }, headers: { 'X-Agentci': '1' } });
+    assert.equal(locked.status, 403);
+  } finally { await srv.close(); }
+});

@@ -55,6 +55,7 @@ ${color.bold('Options')}
   --host <address>            for "ui"/"gateway": make it reachable on the network (e.g. 0.0.0.0)
   --allow-host <name>         for "ui": accept this Host header (reverse proxy, domain);
                               repeatable or comma-separated, always requires a token
+  --lock-dir                  for "ui": do not allow switching the project folder
   --serve                     for "bundle": offer it for download on the network
   --dir <path>                for "bundle": target folder for the package
   --local                     Ignore the gateway for this run (claude/codex run locally)
@@ -76,6 +77,7 @@ function parseArgs(argv) {
     else if (a === '--no-open') out.noOpen = true;
     else if (a === '--no-ui') out.noUi = true;
     else if (a === '--serve') out.serve = true;
+    else if (a === '--lock-dir') out.lockDir = true;
     else if (a === '--allow-host') out.allowHost = [...(out.allowHost || []), ...String(argv[++i] || '').split(',').map((h) => h.trim()).filter(Boolean)];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--local') out.local = true;
@@ -141,7 +143,7 @@ async function ui(cwd, args) {
   const token = remote ? (args.token || uiToken()) : null;
   let renderer = null;
   const srv = createServer({
-    cwd, port, host, token, allowedHosts,
+    cwd, port, host, token, allowedHosts, lockDir: Boolean(args.lockDir),
     onOrchestrator(orch) {
       renderer?.detach();
       renderer = new TerminalRenderer({ showFooter: false }).attach(orch);
@@ -388,7 +390,7 @@ const FLAGS = {
   run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
   plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
   resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
-  ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost'],
+  ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost', 'lockDir'],
   gateway: ['port', 'host', 'token', 'cert', 'key', 'noUi', 'dryRun'],
   bundle: ['serve', 'port', 'host', 'dirOut'],
   demo: ['roles'],
@@ -396,7 +398,7 @@ const FLAGS = {
 };
 const FLAG_NAMES = {
   port: '--port', host: '--host', token: '--token', cert: '--cert', key: '--key', noOpen: '--no-open',
-  noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', local: '--local', noReview: '--no-review', noTests: '--no-tests',
+  noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', lockDir: '--lock-dir', local: '--local', noReview: '--no-review', noTests: '--no-tests',
   docs: '--docs', fixAttempts: '--fix-attempts', dryRun: '--dry-run', roles: '--planner/--coder/…', dirOut: '--dir',
 };
 

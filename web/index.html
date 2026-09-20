@@ -20,7 +20,20 @@
         <img src="/logo.svg" alt="" width="26" height="26">
         <span>agentci</span>
       </a>
-      <span class="workspace mono" id="workspace" title="Working directory"></span>
+      <div class="folder-wrap">
+        <button class="workspace mono" id="workspace" title="Working directory – click to switch" aria-haspopup="dialog"></button>
+        <div class="folder-pop" id="folderPop" hidden>
+          <div class="fp-head">
+            <input class="model-input" id="fpPath" spellcheck="false" aria-label="Folder path">
+            <button class="btn btn-sm btn-primary" id="fpOpen">Open</button>
+          </div>
+          <div class="fp-section" id="fpRecentTitle">Recent</div>
+          <div class="fp-list" id="fpRecent"></div>
+          <div class="fp-section">Subfolders of <span class="mono" id="fpHere"></span></div>
+          <div class="fp-list" id="fpFolders"></div>
+          <div class="fp-error" id="fpError" hidden></div>
+        </div>
+      </div>
       <div class="topbar-spacer"></div>
       <div class="live-meta" id="liveMeta" hidden>
         <span class="meta-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="metaTime">0:00</span></span>

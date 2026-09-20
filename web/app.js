@@ -530,7 +530,7 @@ function renderAgentTools(a) {
 
 function agentHeader(a) {
   const state = a.error && a.done ? `<span style="color:var(--danger)">✗ ${esc(a.error)}</span>`
-    : a.done ? `<span class="ev-meta">✓ ${clock(a.ms || 0)}${a.tools.length ? ` · ${a.tools.length} ${a.tools.length === 1 ? 'Aktion' : 'Aktionen'}` : ''}${a.costUsd ? ` · $${a.costUsd.toFixed(2)}` : ''}</span>`
+    : a.done ? `<span class="ev-meta">✓ ${clock(a.ms || 0)}${a.tools.length ? ` · ${a.tools.length} ${a.tools.length === 1 ? 'action' : 'actions'}` : ''}${a.costUsd ? ` · $${a.costUsd.toFixed(2)}` : ''}</span>`
       : '<span class="spinner"></span>';
   return `<span class="ev-role">${ROLE_NAME[a.role]}</span><span>${esc(PHASE[a.phase] || a.phase)}${a.todo ? ` <span class="ev-meta">${esc(a.todo)}</span>` : ''}</span>${state}`;
 }
@@ -668,6 +668,7 @@ function connect() {
       scheduleRender();
       return;
     }
+    if (ev.type === 'cwd') { reloadForFolder(); return; }   // another tab switched the folder
     if (!app.live) return;
     if (ev.type === 'state') {
       app.state = ev.state;
@@ -818,6 +819,106 @@ function bindRunView() {
   });
 }
 
+// ---------------- folder switcher ----------------
+// The working folder decides which history, plan and config the UI shows,
+// so it can be switched from the top bar.
+const folder = { open: false, here: null };
+
+async function openFolderPop(show = !folder.open) {
+  folder.open = show;
+  $('#folderPop').hidden = !show;
+  if (!show) return;
+  $('#fpError').hidden = true;
+  $('#fpPath').value = app.status.cwd;
+  renderRecents();
+  await browseTo(app.status.cwd);
+  $('#fpPath').focus();
+  $('#fpPath').select();
+}
+
+function renderRecents() {
+  const list = app.status.recentFolders || [];
+  $('#fpRecent').innerHTML = list.length
+    ? list.map((f) => `<button class="fp-item${f.path === app.status.cwd ? ' current' : ''}" data-go="${esc(f.path)}">
+        ${icon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>')}
+        <span>${esc(f.name)}</span>${f.hasHistory ? '<span class="hist">history</span>' : ''}<span class="p">${esc(f.path)}</span>
+      </button>`).join('')
+    : '<div class="fp-empty">No folders yet</div>';
+}
+
+async function browseTo(p) {
+  try {
+    const d = await api('GET', `/api/browse?path=${encodeURIComponent(p)}`);
+    folder.here = d.path;
+    $('#fpHere').textContent = d.path;
+    $('#fpFolders').innerHTML = (d.parent ? `<button class="fp-item" data-browse="${esc(d.parent)}">${icon('<path d="M19 12H5M11 18l-6-6 6-6"/>')}<span>..</span></button>` : '')
+      + (d.folders.length
+        ? d.folders.map((name) => `<button class="fp-item" data-browse="${esc(d.path.replace(/\/$/, ''))}/${esc(name)}"><span>${esc(name)}</span></button>`).join('')
+        : '<div class="fp-empty">No subfolders</div>');
+  } catch (e) {
+    $('#fpError').hidden = false;
+    $('#fpError').textContent = e.message;
+  }
+}
+
+async function switchFolder(p) {
+  try {
+    const res = await api('POST', '/api/cwd', { path: p });
+    app.status.cwd = res.cwd;
+    app.status.recentFolders = res.recentFolders;
+    setFolderChip(res.cwd);
+    openFolderPop(false);
+    toast(`Folder: ${res.cwd}`, 'success');
+    await reloadForFolder();
+  } catch (e) {
+    $('#fpError').hidden = false;
+    $('#fpError').textContent = e.message;
+  }
+}
+
+// Everything on screen belongs to the old folder – reload it.
+function setFolderChip(dir) {
+  const parts = dir.split('/').filter(Boolean);
+  const short = parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : dir;
+  $('#workspace').textContent = short;
+  $('#workspace').title = `Working directory: ${dir} – click to switch`;
+}
+
+async function reloadForFolder() {
+  graph.data = null;
+  graph.collapsedInit = false;
+  graph.collapsed.clear();
+  resetRun();
+  app.live = false;
+  app.status = await api('GET', '/api/status');
+  setFolderChip(app.status.cwd);
+  renderProviders();
+  await refreshRuns();
+  const latest = app.runs[0];
+  if (latest) await openRun(latest.runId); else { app.view = 'compose'; showView(); }
+}
+
+function bindFolder() {
+  $('#workspace').onclick = () => {
+    if (app.status?.canSwitchFolder === false) return toast('The folder is fixed for this server (--lock-dir)');
+    openFolderPop();
+  };
+  $('#fpOpen').onclick = () => switchFolder($('#fpPath').value.trim());
+  $('#folderPop').addEventListener('click', (e) => {
+    const go = e.target.closest('[data-go]');
+    if (go) return switchFolder(go.dataset.go);
+    const br = e.target.closest('[data-browse]');
+    if (br) { $('#fpPath').value = br.dataset.browse; browseTo(br.dataset.browse); }
+  });
+  $('#fpPath').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); switchFolder($('#fpPath').value.trim()); }
+    if (e.key === 'Escape') openFolderPop(false);
+  });
+  document.addEventListener('click', (e) => {
+    if (folder.open && !e.target.closest('.folder-wrap')) openFolderPop(false);
+  });
+}
+
 // ---------------- chrome ----------------
 function closeSidebar() { $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('open'); }
 
@@ -859,14 +960,14 @@ async function boot() {
   bindCompose();
   bindRunView();
   bindGraph();
+  bindFolder();
   try {
     app.status = await api('GET', '/api/status');
   } catch (e) {
     if (e.message !== 'token required') toast(`Server not reachable: ${e.message}`, 'error');
     return; // the gate is already showing
   }
-  $('#workspace').textContent = app.status.cwd;
-  $('#workspace').title = `Working directory: ${app.status.cwd}`;
+  setFolderChip(app.status.cwd);
   app.busy = app.status.busy;
   renderProviders();
   initForm();

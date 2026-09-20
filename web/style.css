@@ -101,6 +101,32 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   max-width: 36vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .topbar-spacer { flex: 1; }
+
+/* folder switcher */
+.folder-wrap { position: relative; }
+button.workspace { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+button.workspace::after { content: '▾'; color: var(--faint); }
+button.workspace:hover { border-color: var(--faint); color: var(--text); }
+.folder-pop {
+  position: absolute; top: calc(100% + 8px); left: 0; width: min(460px, 92vw); z-index: 40;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: var(--shadow);
+  padding: 12px; display: flex; flex-direction: column; gap: 8px; max-height: 70vh;
+}
+.fp-head { display: flex; gap: 8px; }
+.fp-head .model-input { flex: 1; }
+.fp-section { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); margin-top: 2px; }
+.fp-section .mono { text-transform: none; letter-spacing: 0; font-size: 11px; }
+.fp-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; max-height: 190px; }
+.fp-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 1px solid transparent; border-radius: 8px; padding: 7px 9px; font-size: 13px; color: var(--text);
+}
+.fp-item:hover { background: var(--panel-2); border-color: var(--line); }
+.fp-item .p { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
+.fp-item .hist { font-size: 10.5px; color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent); border-radius: 5px; padding: 0 5px; }
+.fp-item.current { border-color: var(--accent); }
+.fp-empty { font-size: 12px; color: var(--faint); padding: 6px 9px; }
+.fp-error { font-size: 12.5px; color: var(--danger); }
 .live-meta { display: flex; gap: 14px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .meta-item { display: inline-flex; align-items: center; gap: 6px; }
 .meta-item svg { width: 14px; height: 14px; }

@@ -149,6 +149,7 @@ agentci ui --host 0.0.0.0     # reachable on the network, prints a token
 
 - **Start a job** and pick the AI per role; toggle reviewer, tester and docs. "Save as default" writes `agentci.config.json`.
 - **Live view**: progress per todo, status chips (checks, fix attempts, review, files), which agent is working right now with elapsed time and current action, and a timeline with every tool call, every failing check and every review issue.
+- **Switch the project folder** from the top bar: recently used folders (marked when they already have agentci history), a path field and a small folder browser. History, plan and config live in that folder's `.agentci/`, so switching brings the matching history back. `--lock-dir` pins the folder.
 - **Diff viewer** per todo, **history** of all previous runs, stop and resume.
 - Dark and light theme, works on a phone.
 - Served on `localhost` only unless you pass `--host`; then a token is required for every piece of data (kept in `~/.config/agentci/ui-token`). On untrusted networks prefer `ssh -L 4317:localhost:4317 user@server`.
@@ -284,7 +285,7 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
 ## Development
 
 ```bash
-npm test          # 68 tests, no dependencies, no AI calls
+npm test          # 70 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 
