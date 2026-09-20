@@ -26,6 +26,7 @@ export const DEFAULT_CONFIG = {
     syntax: true,           // built-in syntax checker for all changed files
     commands: [],           // extra shell commands, e.g. ["npm run lint", "npm test"]
     autoDetectTests: true,  // npm test / pytest / go test / cargo test when detected
+    autoInstall: true,      // run npm install once when a test command needs node_modules
   },
   permissions: {
     // claude: acceptEdits = files ok, shell only for allowed commands; bypassPermissions = everything

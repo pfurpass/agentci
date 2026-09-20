@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { extractJson } from '../src/providers/proc.js';
 import { normalizeTodos } from '../src/orchestrator.js';
-import { checkFileSyntax, runChecks, detectTestCommands } from '../src/checker.js';
+import { checkFileSyntax, runChecks, detectTestCommands, ensureDependencies, isToolingFailure } from '../src/checker.js';
 import { snapshot, diffSnapshots, unifiedDiff } from '../src/snapshot.js';
 import { loadConfig, DEFAULT_CONFIG } from '../src/config.js';
 
@@ -99,4 +99,38 @@ test('config: user file is deep-merged over defaults and validated', () => {
   assert.equal(cfg.pipeline.maxReviewRounds, DEFAULT_CONFIG.pipeline.maxReviewRounds);
   fs.writeFileSync(path.join(d, 'agentci.config.json'), JSON.stringify({ roles: { coder: { provider: 'gpt99' } } }));
   assert.throws(() => loadConfig(d), /unknown provider/);
+});
+
+test('checker installs missing node dependencies once, before running the tests', () => {
+  const d = tmp();
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({
+    name: 'x', version: '1.0.0', scripts: { test: 'node --test' }, devDependencies: {},
+  }));
+  // no devDependencies -> nothing to install
+  assert.equal(ensureDependencies(d, ['npm test --silent']), null);
+
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({
+    name: 'x', version: '1.0.0', scripts: { test: 'node --test' }, devDependencies: { 'left-pad': '1.3.0' },
+  }));
+  assert.equal(ensureDependencies(d, ['pytest -q']), null, 'python-only projects are left alone');
+  assert.equal(ensureDependencies(d, ['npm test --silent'], { install: false }), null, 'can be turned off');
+
+  fs.mkdirSync(path.join(d, 'node_modules'));
+  assert.equal(ensureDependencies(d, ['npm test --silent']), null, 'nothing to do when node_modules exists');
+});
+
+test('checker tells "tool missing" apart from "code broken"', () => {
+  assert.equal(isToolingFailure('sh: 1: jest: not found'), true);
+  assert.equal(isToolingFailure("Error: Cannot find module 'vitest'"), true);
+  assert.equal(isToolingFailure("ModuleNotFoundError: No module named 'pytest'"), true);
+  assert.equal(isToolingFailure('AssertionError [ERR_ASSERTION]: 1 == 2'), false);
+  assert.equal(isToolingFailure('SyntaxError: Unexpected token'), false);
+
+  const d = tmp();
+  fs.writeFileSync(path.join(d, 'a.js'), 'module.exports = 1;\n');
+  const res = runChecks(d, ['a.js'], { syntax: true, commands: ['definitely-not-a-real-binary'], autoDetectTests: false });
+  assert.equal(res.ok, false);
+  assert.equal(res.tooling, true, 'a missing binary is a tooling problem');
+  const broken = runChecks(d, ['a.js'], { syntax: true, commands: ['node -e "process.exit(1)"'], autoDetectTests: false });
+  assert.equal(broken.tooling, false, 'a failing command is not');
 });

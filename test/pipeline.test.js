@@ -76,7 +76,7 @@ test('persistent syntax errors fail the todo and skip dependents', async () => {
   const orch = new Orchestrator({ cwd, config: config({ maxFixAttempts: 2 }), providers: { fake: f.provider }, quiet: true });
   const st = await orch.run('task');
   assert.deepEqual(st.todos.map((t) => t.status), ['failed', 'skipped']);
-  assert.equal(f.calls.filter((c) => c === 'coder:fix:T1').length, 2);
+  assert.equal(f.calls.filter((c) => c === 'coder:fix:T1').length, 1, 'the identical error stops the loop after one attempt');
   assert.ok(!f.calls.some((c) => c.includes('T2')));
 });
 
@@ -295,4 +295,41 @@ test('diffs skip generated files and cap long files', () => {
   assert.ok(!text.includes('"a":2'), 'the lockfile content is not shipped');
   assert.match(text, /more lines – open the file if you need them/);
   assert.ok(text.split('\n').length < 500, 'the long file is capped');
+});
+
+test('missing tooling does not burn fix attempts on the coder', async () => {
+  const cwd = tmp();
+  const f = fake({
+    plan: () => ({ data: { summary: 's', todos: [{ id: 'T1', title: 'a', details: '', dependsOn: [], acceptance: '' }] } }),
+    implement: ({ cwd: c }) => { fs.writeFileSync(path.join(c, 'a.js'), 'module.exports = 1;\n'); },
+    review: () => ({ data: { approved: true, summary: 'ok', issues: [] } }),
+  });
+  const cfg = config({ writeTests: false });
+  cfg.checks = { syntax: true, commands: ['this-binary-does-not-exist'], autoDetectTests: false };
+  const notes = [];
+  const orch = new Orchestrator({ cwd, config: cfg, providers: { fake: f.provider } });
+  orch.on('event', (e) => { if (e.type === 'note') notes.push(e.text); });
+  const st = await orch.run('task');
+  assert.equal(st.todos[0].status, 'done', 'the code itself was fine');
+  assert.equal(st.todos[0].toolingMissing, true);
+  assert.ok(!f.calls.includes('coder:fix:T1'), 'the coder is not asked to fix a missing binary');
+  assert.match(notes.join(), /tooling missing/);
+  assert.match(st.todos[0].notes.join(), /required tooling is missing/);
+});
+
+test('an identical error after a fix stops the loop early', async () => {
+  const cwd = tmp();
+  let fixes = 0;
+  const f = fake({
+    plan: () => ({ data: { summary: 's', todos: [{ id: 'T1', title: 'a', details: '', dependsOn: [], acceptance: '' }] } }),
+    implement: ({ cwd: c }) => { fs.writeFileSync(path.join(c, 'broken.py'), 'def f(:\n'); },
+    fix: () => { fixes++; },   // the coder never actually fixes it
+  });
+  const notes = [];
+  const orch = new Orchestrator({ cwd, config: config({ maxFixAttempts: 5 }), providers: { fake: f.provider } });
+  orch.on('event', (e) => { if (e.type === 'note') notes.push(e.text); });
+  const st = await orch.run('task');
+  assert.equal(st.todos[0].status, 'failed');
+  assert.equal(fixes, 1, 'one attempt, then stop – not five identical rounds');
+  assert.match(notes.join(), /same error after the fix/);
 });

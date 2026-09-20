@@ -158,6 +158,39 @@ export function runCommand(cwd, cmd, timeoutMs = 10 * 60_000) {
   return { cmd, ok: r.status === 0 && !timedOut, output: timedOut ? `${output}\n(timed out)` : output };
 }
 
+// Missing tooling is not a coding mistake – the coder cannot fix "jest: not found",
+// especially when the agents run on a gateway where node_modules stays behind.
+const TOOLING_MISSING = [
+  /\b(\w[\w.-]*): not found/i,
+  /command not found/i,
+  /Cannot find module '(jest|vitest|mocha|ts-node|tsx|@[\w./-]+)'/i,
+  /ModuleNotFoundError: No module named '(pytest|unittest2)'/i,
+  /ENOENT.*spawn/i,
+  /npm ERR! (code E404|missing script)/i,
+];
+
+export function isToolingFailure(output = '') {
+  return TOOLING_MISSING.some((re) => re.test(output));
+}
+
+// Installs project dependencies once when a test command needs them – no AI involved.
+export function ensureDependencies(cwd, commands, { install = true } = {}) {
+  if (!install) return null;
+  const needsNode = commands.some((c) => /^(npm|npx|yarn|pnpm|node --test)/.test(c));
+  const hasPkg = fs.existsSync(path.join(cwd, 'package.json'));
+  const hasModules = fs.existsSync(path.join(cwd, 'node_modules'));
+  if (!needsNode || !hasPkg || hasModules) return null;
+  let deps = {};
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
+    deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  } catch { /* the syntax check reports a broken package.json */ }
+  if (!Object.keys(deps).length) return null;
+  const cmd = fs.existsSync(path.join(cwd, 'package-lock.json')) ? 'npm ci --no-audit --no-fund' : 'npm install --no-audit --no-fund';
+  const r = runCommand(cwd, cmd, 10 * 60_000);
+  return { cmd, ok: r.ok, output: tail(r.output, 1500) };
+}
+
 // Full check: syntax of changed files + configured/detected commands.
 export function runChecks(cwd, changedFiles, checksCfg) {
   const syntax = checksCfg.syntax ? changedFiles.map((f) => checkFileSyntax(cwd, f)) : [];
@@ -165,12 +198,20 @@ export function runChecks(cwd, changedFiles, checksCfg) {
   if (checksCfg.autoDetectTests) {
     for (const c of detectTestCommands(cwd)) if (!commands.includes(c)) commands.push(c);
   }
+  const install = ensureDependencies(cwd, commands, { install: checksCfg.autoInstall !== false });
   const cmdResults = commands.map((c) => runCommand(cwd, c));
   const failures = [
     ...syntax.filter((s) => !s.ok).map((s) => `SYNTAX ERROR in ${s.file}:\n${tail(s.output)}`),
     ...cmdResults.filter((r) => !r.ok).map((r) => `COMMAND FAILED: ${r.cmd}\n${tail(r.output)}`),
   ];
-  return { ok: failures.length === 0, syntax, commands: cmdResults, failures, report: failures.join('\n\n') };
+  const tooling = cmdResults.filter((r) => !r.ok).length > 0
+    && cmdResults.filter((r) => !r.ok).every((r) => isToolingFailure(r.output))
+    && syntax.every((s) => s.ok);
+  return {
+    ok: failures.length === 0, syntax, commands: cmdResults, failures, install,
+    tooling, // every failure is "tool missing", not broken code
+    report: failures.join('\n\n'),
+  };
 }
 
 function tail(s, max = 4000) {

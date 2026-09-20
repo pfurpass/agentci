@@ -355,6 +355,7 @@ export class Orchestrator extends EventEmitter {
   // Runs syntax checks + tests on everything changed since `before`; lets the coder fix failures.
   async checkAndFix(todo, before, hint = '') {
     const max = this.cfg.pipeline.maxFixAttempts;
+    let lastReport = null;
     for (let attempt = 0; ; attempt++) {
       if (this.aborted) throw new AbortedError();
       const changes = diffSnapshots(before, snapshot(this.cwd, this.cfg.ignore));
@@ -362,12 +363,40 @@ export class Orchestrator extends EventEmitter {
       const res = runChecks(this.cwd, changes.changed, this.cfg.checks);
       const clean = (o) => cleanOutput(o, this.cwd);
       todo.checksOk = res.ok;
+      if (res.install) {
+        this.send('note', {
+          todo: todo.id,
+          level: res.install.ok ? 'info' : 'warn',
+          text: res.install.ok ? `installed dependencies (${res.install.cmd})` : `${res.install.cmd} failed – tests may not run here`,
+        });
+      }
       this.send('checks', {
         todo: todo.id, ok: res.ok,
         syntax: res.syntax.map((s) => ({ file: s.file, ok: s.ok, skipped: s.skipped || null, output: s.ok ? '' : tail(clean(s.output), 1500) })),
         commands: res.commands.map((c) => ({ cmd: c.cmd, ok: c.ok, output: tail(clean(c.output), c.ok ? 400 : 3000) })),
       });
       if (res.ok) return true;
+
+      // The coder cannot install tools on this machine (with a gateway it installs them
+      // on the gateway, where node_modules never syncs back). Don't spend fix attempts on it.
+      if (res.tooling) {
+        todo.toolingMissing = true;
+        const hint = this.gateway
+          ? 'the agents run on the gateway, so anything they install there never reaches this machine'
+          : 'install it here, or point checks.commands at the right command';
+        todo.notes.push(`Tests could not run – required tooling is missing (${hint}):\n${clean(res.report).slice(0, 600)}`);
+        this.send('note', { todo: todo.id, level: 'warn', text: `tests skipped – tooling missing (${hint})` });
+        return true; // the code itself passed its syntax check
+      }
+
+      // Identical error after a fix attempt means the coder is stuck – stop instead of looping.
+      if (lastReport === res.report) {
+        todo.notes.push(`Checks report the same error after a fix attempt – stopping:\n${clean(res.report).slice(0, 600)}`);
+        this.send('note', { todo: todo.id, level: 'warn', text: 'same error after the fix – stopping the fix loop' });
+        return false;
+      }
+      lastReport = res.report;
+
       if (attempt >= max) {
         todo.notes.push(`Checks still failing after ${max} fix attempts:\n${res.report.slice(0, 2000)}`);
         return false;

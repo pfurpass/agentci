@@ -285,6 +285,7 @@ Every agent call carries Claude Code's own system prompt (~22–24k tokens). age
 | **One shared system prompt** for all roles (the role text travels in the message) so Claude's prompt cache keeps hitting | cache writes per call 7.8k → 3.8k tokens, **≈40% cheaper per call** (measured, haiku) |
 | **Project map** instead of the agents exploring the tree | no `ls`/`grep`/curiosity reads; ~2 kB for 28 files |
 | **Tester call skipped** when the coder already wrote tests for that todo | one whole agent call less per todo |
+| **Dependencies installed once** by the checker instead of by an agent per attempt | no repeated `npm install` agent calls |
 | **Lean review diffs**: lockfiles and generated files are named, not dumped; 400 lines per file cap | large refactors no longer ship 15k-token diffs |
 | `--strict-mcp-config` | a project's `.mcp.json` servers never get loaded into the context |
 
@@ -316,6 +317,8 @@ The checker, the project map and the diff cost nothing – they run locally with
 | `Node … is too old` | Node ≥ 20 required. Oracle/RHEL: `sudo dnf module enable -y nodejs:22 && sudo dnf install -y nodejs npm` |
 | Codex: `codex-code-mode-host` missing | Incomplete Codex install (only the binary was copied): `npm i -g @openai/codex`. `agentci doctor` detects it and agentci refuses to start Codex as coder/tester. |
 | `usage limit reached` | Your ChatGPT/Claude quota. The role's `fallback` takes over automatically. |
+| `jest: not found` / `No module named pytest` in the checks | Dependencies are missing **on the machine that runs the checks**. agentci now runs `npm install` itself once before the tests. If that fails (no internet, or the agents installed them on the gateway where `node_modules` never syncs back), the todo is marked *tooling missing* and the tests are skipped instead of sending the coder into a fix loop it cannot win. Fix: install the dependencies on this machine, or point `checks.commands` at a command that works here. Turn the auto-install off with `"checks": { "autoInstall": false }`. |
+| The same check error repeats after a fix | agentci stops the fix loop as soon as the error is byte-identical after an attempt, and says so. |
 | An agent reports success but nothing happened | Cannot pass silently: a coder that changed no file gets one retry and then fails the todo; a tester that wrote nothing marks the todo *untested*. |
 | `claude` bills an API key instead of the subscription | `ANTHROPIC_API_KEY` is set in your environment. `agentci doctor` warns about it. |
 | Web UI unreachable from another machine | By design. Use `agentci ui --host 0.0.0.0` (token) or an SSH tunnel. |
@@ -323,7 +326,7 @@ The checker, the project map and the diff cost nothing – they run locally with
 ## Development
 
 ```bash
-npm test          # 81 tests, no dependencies, no AI calls
+npm test          # 85 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 
