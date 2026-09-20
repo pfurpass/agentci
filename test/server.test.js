@@ -347,3 +347,18 @@ test('attachments over HTTP: upload, list, fetch, delete', () => withServer(asyn
   assert.deepEqual(del.json.attachments, []);
   assert.equal((await request(port, 'DELETE', `/api/attachments/${encodeURIComponent(up.json.id)}`)).status, 403, 'needs the CSRF header');
 }));
+
+test('switching folders takes the draft attachments along', () => withServer(async ({ port, cwd }) => {
+  const h = { 'X-Agentci': '1' };
+  const other = tmp();
+  const up = (await request(port, 'POST', '/api/attachments', { body: { name: 'shot.png', data: Buffer.from('89504e470d0a1a0a', 'hex').toString('base64') }, headers: h })).json;
+  const keep = (await request(port, 'POST', '/api/attachments', { body: { name: 'stays.md', data: Buffer.from('x').toString('base64') }, headers: h })).json;
+
+  const res = await request(port, 'POST', '/api/cwd', { body: { path: other, carryAttachments: [up.id] }, headers: h });
+  assert.equal(res.status, 200, res.text);
+  assert.deepEqual(res.json.carried.map((a) => a.name), ['shot.png'], 'the pasted screenshot moved along');
+  assert.deepEqual(res.json.attachments.map((a) => a.name), ['shot.png'], 'and is listed in the new folder');
+  assert.ok(fs.existsSync(path.join(other, up.path)));
+  assert.ok(fs.existsSync(path.join(cwd, keep.path)), 'the untouched one stays behind in the old folder');
+  assert.ok(fs.existsSync(path.join(cwd, up.path)), 'the original is copied, not moved away');
+}));

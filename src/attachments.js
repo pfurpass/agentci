@@ -80,6 +80,23 @@ export function deleteAttachment(cwd, id) {
   fs.rmSync(path.join(attachmentsDir(cwd), clean), { force: true });
 }
 
+// Moves attachments along when the user switches the project folder – the draft
+// in the composer should survive that.
+export function copyAttachments(fromCwd, toCwd, ids = []) {
+  const out = [];
+  for (const id of ids) {
+    const clean = path.basename(String(id));
+    const src = path.join(attachmentsDir(fromCwd), clean);
+    if (!fs.existsSync(src)) continue;
+    const dir = attachmentsDir(toCwd);
+    fs.mkdirSync(dir, { recursive: true });
+    const target = path.join(dir, clean);
+    if (!fs.existsSync(target)) fs.copyFileSync(src, target);
+    out.push(entry(toCwd, clean));
+  }
+  return out;
+}
+
 // Copies a file the user passed on the command line (agentci run --attach spec.md).
 export function attachFromDisk(cwd, filePath) {
   const full = path.resolve(filePath);

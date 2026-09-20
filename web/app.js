@@ -276,6 +276,10 @@ async function startRun(kind) {
     app.view = 'run'; app.live = true; app.viewingRunId = null;
     showView();
     await api('POST', kind === 'plan' ? '/api/plan' : '/api/run', formBody(task));
+    clearDraft();
+    $('#task').value = '';
+    app.attachments = [];
+    renderAttachments();
   } catch (e) {
     toast(e.message, 'error');
     app.view = 'compose'; showView();
@@ -294,6 +298,7 @@ function bindCompose() {
   $('#task').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); startRun('run'); }
   });
+  $('#task').addEventListener('input', saveDraft);
   $('#teamGrid').addEventListener('click', (e) => {
     const b = e.target.closest('[data-provider]');
     if (!b) return;
@@ -671,7 +676,10 @@ function connect() {
       scheduleRender();
       return;
     }
-    if (ev.type === 'cwd') { reloadForFolder(); return; }   // another tab switched the folder
+    if (ev.type === 'cwd') {                                 // another tab switched the folder
+      if (!app.switching) reloadForFolder();
+      return;
+    }
     if (!app.live) return;
     if (ev.type === 'state') {
       app.state = ev.state;
@@ -822,6 +830,32 @@ function bindRunView() {
   });
 }
 
+// ---------------- draft (survives reloads and folder switches) ----------------
+const draftKey = () => `agentci-draft:${app.status?.cwd || ''}`;
+
+function saveDraft() {
+  if (!app.status) return;
+  const draft = { task: $('#task').value, attachments: (app.attachments || []).filter((a) => a.id) };
+  try {
+    if (draft.task.trim() || draft.attachments.length) localStorage.setItem(draftKey(), JSON.stringify(draft));
+    else localStorage.removeItem(draftKey());
+  } catch { /* private mode – the draft just isn't persisted */ }
+}
+
+function loadDraft(known = []) {
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(draftKey()) || 'null'); } catch { /* ignore */ }
+  if (!draft) return;
+  if (draft.task && !$('#task').value) $('#task').value = draft.task;
+  // only keep attachments that still exist in this folder
+  const byId = new Map(known.map((a) => [a.id, a]));
+  app.attachments = (draft.attachments || []).map((a) => byId.get(a.id)).filter(Boolean);
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(draftKey()); } catch { /* ignore */ }
+}
+
 // ---------------- attachments ----------------
 // Screenshots pasted with Ctrl+V, dropped files or picked ones. They are stored in the
 // project (.agentci/attachments) and every agent gets their paths in its prompt.
@@ -856,6 +890,7 @@ async function uploadFiles(files) {
       });
       const saved = await api('POST', '/api/attachments', { name: placeholder.name, data });
       Object.assign(placeholder, saved, { pending: false });
+      saveDraft();
     } catch (e) {
       app.attachments = app.attachments.filter((a) => a !== placeholder);
       toast(`${placeholder.name}: ${e.message}`, 'error');
@@ -890,6 +925,7 @@ function bindAttachments() {
       const res = await api('DELETE', `/api/attachments/${encodeURIComponent(b.dataset.dropAtt)}`);
       app.attachments = res.attachments;
       renderAttachments();
+      saveDraft();
     } catch (err) { toast(err.message, 'error'); }
   });
 }
@@ -938,14 +974,22 @@ async function browseTo(p) {
 
 async function switchFolder(p) {
   try {
-    const res = await api('POST', '/api/cwd', { path: p });
+    const carry = (app.attachments || []).filter((a) => a.id).map((a) => a.id);
+    // set before the request: the 'cwd' event may arrive before the response does
+    app.carryOver = { task: $('#task').value, attachments: [] };
+    app.switching = true;
+    const res = await api('POST', '/api/cwd', { path: p, carryAttachments: carry });
+    app.carryOver.attachments = res.carried || [];
     app.status.cwd = res.cwd;
     app.status.recentFolders = res.recentFolders;
     setFolderChip(res.cwd);
     openFolderPop(false);
-    toast(`Folder: ${res.cwd}`, 'success');
+    toast(`Folder: ${res.cwd}${res.carried?.length ? ` · ${res.carried.length} attachment(s) moved along` : ''}`, 'success');
     await reloadForFolder();
+    app.switching = false;
   } catch (e) {
+    app.switching = false;
+    app.carryOver = null;
     $('#fpError').hidden = false;
     $('#fpError').textContent = e.message;
   }
@@ -960,7 +1004,15 @@ function setFolderChip(dir) {
 }
 
 async function reloadForFolder() {
-  app.attachments = await api('GET', '/api/attachments').catch(() => []);
+  const known = await api('GET', '/api/attachments').catch(() => []);
+  app.attachments = [];
+  loadDraft(known);
+  if (app.carryOver) {           // draft follows the user into the new folder
+    if (app.carryOver.task) $('#task').value = app.carryOver.task;
+    if (app.carryOver.attachments.length) app.attachments = app.carryOver.attachments;
+    app.carryOver = null;
+    saveDraft();                 // store it under the new folder's key
+  }
   renderAttachments();
   graph.data = null;
   graph.collapsedInit = false;
@@ -1051,7 +1103,7 @@ async function boot() {
   initForm();
   renderGateway();
   bindGateway();
-  app.attachments = await api('GET', '/api/attachments').catch(() => []);
+  loadDraft(await api('GET', '/api/attachments').catch(() => []));
   renderAttachments();
   await refreshRuns();
   showView();

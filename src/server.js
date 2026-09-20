@@ -11,7 +11,7 @@ import { loadGatewaySettings, saveGatewaySettings, publicGatewaySettings, normal
 import { Orchestrator, publicState } from './orchestrator.js';
 import { serveStatic } from './static.js';
 import { createCodeMapCache, graphData } from './codemap.js';
-import { saveAttachment, listAttachments, readAttachment, deleteAttachment, MAX_ATTACHMENT_BYTES } from './attachments.js';
+import { saveAttachment, listAttachments, readAttachment, deleteAttachment, copyAttachments, MAX_ATTACHMENT_BYTES } from './attachments.js';
 
 const MAX_BODY = 1024 * 1024;
 const MAX_UPLOAD = MAX_ATTACHMENT_BYTES + 1024 * 1024; // base64 overhead
@@ -113,11 +113,13 @@ export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', t
       if (lockDir) throw httpError(403, 'the folder is fixed for this server (--lock-dir)');
       if (current) throw httpError(409, 'not possible while a run is in progress');
       const next = resolveFolder(b?.path, cwd);
+      // Attachments of an unsent draft move with the user instead of staying behind.
+      const carried = next === cwd ? [] : copyAttachments(cwd, next, b?.carryAttachments || []);
       cwd = next;
       codeMapCache = createCodeMapCache();
       rememberFolder(cwd);
       broadcast({ type: 'cwd', cwd, t: Date.now() });
-      return { cwd, recentFolders: recentFolders(cwd) };
+      return { cwd, recentFolders: recentFolders(cwd), carried, attachments: listAttachments(cwd) };
     },
     'GET /api/file': () => { throw httpError(400, 'path missing'); },
     // The dependency graph is computed here, not by an AI – same map the agents get in their prompts.

@@ -184,6 +184,8 @@ Press <kbd>Ctrl</kbd>+<kbd>V</kbd> in the task field to paste a screenshot, drag
 agentci run --attach design.png --attach spec.md "Rebuild the settings page to match the design"
 ```
 
+Your draft survives: task text and attachments are kept when you look something up in another view, when you reload the page, and when you switch the project folder – the attachments are copied into the new folder with you. Starting a run clears the composer.
+
 Verified with a real run: a screenshot pasted into the UI was opened by the coder (`Read .agentci/attachments/…png`) and described down to the individual buttons. Attachments also travel to a gateway, even though `.agentci/` is otherwise never synced, and they never show up as changes made by an agent.
 
 ### Project map instead of searching (saves tokens)
@@ -295,7 +297,7 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
 ## Development
 
 ```bash
-npm test          # 77 tests, no dependencies, no AI calls
+npm test          # 78 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 
