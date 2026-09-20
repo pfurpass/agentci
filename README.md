@@ -153,6 +153,28 @@ agentci ui --host 0.0.0.0     # reachable on the network, prints a token
 - Dark and light theme, works on a phone.
 - Served on `localhost` only unless you pass `--host`; then a token is required for every piece of data (kept in `~/.config/agentci/ui-token`). On untrusted networks prefer `ssh -L 4317:localhost:4317 user@server`.
 
+#### Behind a reverse proxy / your own domain
+
+agentci only answers to host names it knows – that is what stops DNS-rebinding attacks from a browser. When nginx, Caddy or a Cloudflare tunnel forwards a public name to it, allow that name explicitly (a token is required, because the interface is then effectively public):
+
+```bash
+agentci ui --allow-host agentci.example.com
+# several names: --allow-host a.example.com --allow-host b.example.com
+# or: AGENTCI_ALLOWED_HOSTS=agentci.example.com agentci ui
+```
+
+Otherwise you get `host not allowed: agentci.example.com` – the message contains the exact flag to add. The proxy must not buffer, or the live view stalls:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:4317;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_buffering off;       # required for the live event stream
+    proxy_read_timeout 1h;     # agent calls can take minutes
+}
+```
+
 ### Project map instead of searching (saves tokens)
 
 agentci parses your project itself – **without an LLM** – and ships a compact map in every prompt:
@@ -262,7 +284,7 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
 ## Development
 
 ```bash
-npm test          # 67 tests, no dependencies, no AI calls
+npm test          # 68 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 

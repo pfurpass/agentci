@@ -29,6 +29,7 @@ ${color.bold('Commands')}
   agentci resume              Continue planned or interrupted todos
   agentci ui                  Start the web interface (http://localhost:4317)
   agentci ui --host 0.0.0.0   Expose the interface on the network (prints a token)
+  agentci ui --allow-host <name>   Serve behind a reverse proxy / domain (prints a token)
   agentci gateway             Start gateway + monitor (machine WITH internet + Claude/Codex)
   agentci gateway connect <url> --token <t>   Connect this machine to a gateway
   agentci gateway status|on|off               Check / enable / disable the gateway
@@ -52,6 +53,8 @@ ${color.bold('Options')}
   --no-open                   Do not open the browser for agentci ui
   --no-ui                     Start the gateway without its monitor web interface
   --host <address>            for "ui"/"gateway": make it reachable on the network (e.g. 0.0.0.0)
+  --allow-host <name>         for "ui": accept this Host header (reverse proxy, domain);
+                              repeatable or comma-separated, always requires a token
   --serve                     for "bundle": offer it for download on the network
   --dir <path>                for "bundle": target folder for the package
   --local                     Ignore the gateway for this run (claude/codex run locally)
@@ -73,6 +76,7 @@ function parseArgs(argv) {
     else if (a === '--no-open') out.noOpen = true;
     else if (a === '--no-ui') out.noUi = true;
     else if (a === '--serve') out.serve = true;
+    else if (a === '--allow-host') out.allowHost = [...(out.allowHost || []), ...String(argv[++i] || '').split(',').map((h) => h.trim()).filter(Boolean)];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--local') out.local = true;
     else if (a === '--token') out.token = argv[++i];
@@ -131,11 +135,13 @@ async function runWithTerminal(orch, job) {
 async function ui(cwd, args) {
   const port = Number.isFinite(args.port) ? args.port : 4317;
   const host = args.host || '127.0.0.1';
-  const remote = !['127.0.0.1', 'localhost', '::1'].includes(host);
+  const allowedHosts = args.allowHost || String(process.env.AGENTCI_ALLOWED_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean);
+  const proxied = allowedHosts.some((h) => !['127.0.0.1', 'localhost', '::1'].includes(h));
+  const remote = !['127.0.0.1', 'localhost', '::1'].includes(host) || proxied;
   const token = remote ? (args.token || uiToken()) : null;
   let renderer = null;
   const srv = createServer({
-    cwd, port, host, token,
+    cwd, port, host, token, allowedHosts,
     onOrchestrator(orch) {
       renderer?.detach();
       renderer = new TerminalRenderer({ showFooter: false }).attach(orch);
@@ -147,8 +153,8 @@ async function ui(cwd, args) {
   } catch (e) {
     throw new Error(e.code === 'EADDRINUSE' ? `port ${port} is in use – try --port ${port + 1}` : e.message);
   }
-  const shown = remote ? (host === '0.0.0.0' || host === '::' ? lanAddresses()[0] || 'THIS-MACHINE' : host) : 'localhost';
-  const url = `http://${shown}:${actual}`;
+  const shown = allowedHosts[0] || (remote ? (host === '0.0.0.0' || host === '::' ? lanAddresses()[0] || 'THIS-MACHINE' : host) : 'localhost');
+  const url = allowedHosts[0] ? `https://${shown}` : `http://${shown}:${actual}`;
   const withToken = token ? `${url}/?token=${token}` : url;
   console.log(`\n  ${color.bold('◆ agentci')} ${color.gray('web interface')}\n`);
   console.log(`  ${color.gray('→')} ${color.bold(withToken)}`);
@@ -382,7 +388,7 @@ const FLAGS = {
   run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
   plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
   resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local'],
-  ui: ['port', 'host', 'token', 'noOpen', 'local'],
+  ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost'],
   gateway: ['port', 'host', 'token', 'cert', 'key', 'noUi', 'dryRun'],
   bundle: ['serve', 'port', 'host', 'dirOut'],
   demo: ['roles'],
@@ -390,7 +396,7 @@ const FLAGS = {
 };
 const FLAG_NAMES = {
   port: '--port', host: '--host', token: '--token', cert: '--cert', key: '--key', noOpen: '--no-open',
-  noUi: '--no-ui', serve: '--serve', local: '--local', noReview: '--no-review', noTests: '--no-tests',
+  noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', local: '--local', noReview: '--no-review', noTests: '--no-tests',
   docs: '--docs', fixAttempts: '--fix-attempts', dryRun: '--dry-run', roles: '--planner/--coder/…', dirOut: '--dir',
 };
 

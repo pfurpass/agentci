@@ -235,3 +235,24 @@ test('local UI keeps working without any token and refuses foreign hosts', () =>
   assert.equal((await request(port, 'GET', '/api/status')).status, 200);
   assert.equal((await request(port, 'GET', '/api/status', { headers: { Host: '10.0.0.5:4317' } })).status, 403);
 }));
+
+test('reverse proxy: --allow-host accepts that Host header and demands a token', async () => {
+  const cwd = tmp();
+  const token = 'proxy-token-0123456789';
+  const domain = 'test-agent.example.work';
+  // a public name behind a proxy is as exposed as --host, so a token is required
+  assert.throws(() => createServer({ cwd, port: 0, allowedHosts: [domain] }), /token of at least 16 characters/);
+
+  const srv = createServer({ cwd, port: 0, host: '127.0.0.1', token, allowedHosts: [domain] });
+  const port = await srv.listen();
+  try {
+    const auth = { Authorization: `Bearer ${token}` };
+    assert.equal((await request(port, 'GET', '/api/status', { headers: { Host: domain, ...auth } })).status, 200);
+    assert.equal((await request(port, 'GET', '/api/status', { headers: { Host: `${domain}:443`, ...auth } })).status, 200, 'port in the Host header is ignored');
+    assert.equal((await request(port, 'GET', '/api/status', { headers: { Host: domain } })).status, 401, 'still needs the token');
+    const foreign = await request(port, 'GET', '/api/status', { headers: { Host: 'evil.example', ...auth } });
+    assert.equal(foreign.status, 403);
+    assert.match(foreign.json.error, /--allow-host evil\.example/, 'the error says how to allow it');
+    assert.equal((await request(port, 'GET', '/api/status', { headers: auth })).status, 200, 'localhost keeps working');
+  } finally { await srv.close(); }
+});

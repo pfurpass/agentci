@@ -17,11 +17,15 @@ const MAX_BODY = 1024 * 1024;
 // Local web UI. Binds to 127.0.0.1 only. Every mutating request must carry the X-Agentci header
 // (forces a CORS preflight that we never answer) and a localhost Host header (DNS-rebinding guard),
 // so other websites open in your browser can't start agents on your machine.
-export function createServer({ cwd, port = 4317, host = '127.0.0.1', token = null, onOrchestrator, gateway: gatewayOverride } = {}) {
-  const localOnly = isLoopback(host);
-  // Reachable from the network? Then a token is mandatory – otherwise anyone in the LAN
-  // could start agents that write files and run commands in this project.
-  if (!localOnly && (!token || token.length < 16)) throw new Error('agentci ui --host needs a token of at least 16 characters');
+export function createServer({ cwd, port = 4317, host = '127.0.0.1', token = null, allowedHosts = [], onOrchestrator, gateway: gatewayOverride } = {}) {
+  // Reachable from outside this machine – directly via --host, or through a reverse proxy
+  // that forwards a public name (--allow-host). Both need a token: without one, anyone who
+  // can reach the port could start agents that write files and run commands.
+  const proxied = allowedHosts.some((h) => !isLoopbackName(h));
+  const localOnly = isLoopback(host) && !proxied;
+  if (!localOnly && (!token || token.length < 16)) {
+    throw new Error('agentci ui needs a token of at least 16 characters when it is reachable from outside (--host / --allow-host)');
+  }
   const tokenBuf = token ? Buffer.from(token) : null;
   const authed = (req, url) => {
     if (localOnly) return true;
@@ -152,7 +156,10 @@ export function createServer({ cwd, port = 4317, host = '127.0.0.1', token = nul
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
-      if (!hostAllowed(req.headers.host, localOnly, host)) throw httpError(403, 'host not allowed');
+      if (!hostAllowed(req.headers.host, localOnly, host, allowedHosts)) {
+        const name = String(req.headers.host || '').replace(/:\d+$/, '');
+        throw httpError(403, `host not allowed: ${name}. Behind a reverse proxy start agentci with: agentci ui --allow-host ${name}`);
+      }
       // The page itself is static and harmless; every piece of data needs the token.
       if (!authed(req, url) && url.pathname.startsWith('/api/')) throw httpError(401, 'missing or wrong token');
 
@@ -214,10 +221,14 @@ function isLoopback(addr = '') {
   return ['127.0.0.1', 'localhost', '::1', ''].includes(String(addr));
 }
 
+const isLoopbackName = (h) => ['localhost', '127.0.0.1', '::1'].includes(String(h).replace(/:\d+$/, ''));
+
 // DNS-rebinding guard: only answer to the names/addresses this server is actually reachable under.
-export function hostAllowed(hostHeader = '', localOnly = true, bindHost = '127.0.0.1') {
+export function hostAllowed(hostHeader = '', localOnly = true, bindHost = '127.0.0.1', allowedHosts = []) {
   const name = String(hostHeader).replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
   if (['localhost', '127.0.0.1', '::1'].includes(name)) return true;
+  // Names explicitly allowed for a reverse proxy (nginx, Caddy, Cloudflare tunnel …)
+  if (allowedHosts.map((h) => String(h).replace(/:\d+$/, '')).includes(name)) return true;
   if (localOnly) return false;
   if (bindHost !== '0.0.0.0' && bindHost !== '::') return name === bindHost;
   // bound to every interface: accept this machine's own addresses and hostname
