@@ -37,12 +37,12 @@
     "testing"
   ],
   "author": "Phillip",
-  "homepage": "https://github.com/USER/agentci#readme",
+  "homepage": "https://github.com/pfurpass/agentci#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/USER/agentci.git"
+    "url": "git+https://github.com/pfurpass/agentci.git"
   },
   "bugs": {
-    "url": "https://github.com/USER/agentci/issues"
+    "url": "https://github.com/pfurpass/agentci/issues"
   }
 }

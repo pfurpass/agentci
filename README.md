@@ -5,7 +5,7 @@
 One agent plans, one writes code, one reviews the diff, one writes tests, and a plain non-AI checker verifies syntax and runs your test suite. Everything runs locally: a terminal UI, a web UI, and an optional gateway so machines without internet can use the agents too.
 
 ```bash
-git clone https://github.com/USER/agentci.git && cd agentci
+git clone https://github.com/pfurpass/agentci.git && cd agentci
 bash install.sh          # installs agentci globally, checks Node, Claude Code and Codex
 agentci demo             # free offline demo – no AI calls, no tokens spent
 cd your-project && agentci ui
