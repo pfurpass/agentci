@@ -65,7 +65,8 @@ export function listAttachments(cwd) {
     .filter((n) => !n.startsWith('.'))
     .map((n) => { try { return entry(cwd, n); } catch { return null; } })
     .filter(Boolean)
-    .sort((a, b) => a.addedAt - b.addedAt);
+    // stable order even when two files land in the same millisecond
+    .sort((a, b) => a.addedAt - b.addedAt || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 export function readAttachment(cwd, id) {
