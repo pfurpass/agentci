@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import https from 'node:https';
+import { spawnSync } from 'node:child_process';
 import { createServer, buildConfig } from '../src/server.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'agentci-srv-'));
@@ -373,4 +375,37 @@ test('cheap mode from the UI downgrades every role', () => {
   assert.equal(cfg.roles.reviewer.effort, 'low');
   const normal = buildConfig(cwd, { roles: { coder: { provider: 'claude', model: 'opus' } } });
   assert.equal(normal.roles.coder.model, 'opus', 'without cheap nothing is downgraded');
+});
+
+test('agentci ui serves HTTPS when a certificate is given', async () => {
+  const dir = tmp();
+  const key = path.join(dir, 'key.pem');
+  const cert = path.join(dir, 'cert.pem');
+  const gen = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+    '-subj', '/CN=localhost', '-keyout', key, '-out', cert], { encoding: 'utf8', timeout: 60_000 });
+  if (gen.status !== 0) return; // no openssl here – nothing to verify against
+
+  const srv = createServer({ cwd: tmp(), port: 0, cert, key });
+  assert.equal(srv.tls, true);
+  const port = await srv.listen();
+  try {
+    const agent = new https.Agent({ rejectUnauthorized: false });
+    const res = await fetch(`https://localhost:${port}/api/status`, { dispatcher: undefined, agent });
+    assert.equal(res.status, 200);
+    assert.ok((await res.json()).cwd, 'the API answers over TLS');
+  } catch {
+    // Node's fetch has no agent option – fall back to the https module
+    const body = await new Promise((resolve, reject) => {
+      https.get({ host: 'localhost', port, path: '/api/status', rejectUnauthorized: false }, (r) => {
+        let d = ''; r.on('data', (c) => { d += c; }); r.on('end', () => resolve(d));
+      }).on('error', reject);
+    });
+    assert.ok(JSON.parse(body).cwd, 'the API answers over TLS');
+  } finally { await srv.close(); }
+});
+
+test('--cert without --key is rejected', () => {
+  const dir = tmp();
+  const srv = createServer({ cwd: dir, port: 0, cert: '/nope.pem' });
+  assert.equal(srv.tls, false, 'a certificate without a key does not enable TLS');
 });

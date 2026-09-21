@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +20,7 @@ const MAX_UPLOAD = MAX_ATTACHMENT_BYTES + 1024 * 1024; // base64 overhead
 // Local web UI. Binds to 127.0.0.1 only. Every mutating request must carry the X-Agentci header
 // (forces a CORS preflight that we never answer) and a localhost Host header (DNS-rebinding guard),
 // so other websites open in your browser can't start agents on your machine.
-export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', token = null, allowedHosts = [], lockDir = false, onOrchestrator, gateway: gatewayOverride } = {}) {
+export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', token = null, allowedHosts = [], lockDir = false, cert = null, key = null, onOrchestrator, gateway: gatewayOverride } = {}) {
   // The working folder can be switched from the UI (history and config live inside it),
   // so it is a variable, not a constant.
   let cwd = path.resolve(startCwd);
@@ -179,7 +180,9 @@ export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', t
     },
   };
 
-  const server = http.createServer(async (req, res) => {
+  // TLS when a certificate is given – otherwise plain HTTP (fine on localhost).
+  const tls = Boolean(cert && key);
+  const handler = async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
       if (!hostAllowed(req.headers.host, localOnly, host, allowedHosts)) {
@@ -223,7 +226,10 @@ export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', t
     } catch (e) {
       json(res, e.status || 500, { error: e.message });
     }
-  });
+  };
+  const server = tls
+    ? https.createServer({ cert: fs.readFileSync(cert), key: fs.readFileSync(key) }, handler)
+    : http.createServer(handler);
 
   function sse(req, res) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -239,6 +245,7 @@ export function createServer({ cwd: startCwd, port = 4317, host = '127.0.0.1', t
 
   return {
     server,
+    tls,
     listen: () => new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(port, host, () => resolve(server.address().port));

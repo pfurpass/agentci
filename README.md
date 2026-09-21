@@ -141,8 +141,9 @@ agentci run --docs "…"                                  # enable the docs agen
 ## Web interface
 
 ```bash
-agentci ui                    # http://localhost:4317
-agentci ui --host 0.0.0.0     # reachable on the network, prints a token
+agentci ui                                  # http://localhost:4317
+agentci ui --host 0.0.0.0                   # reachable on the network, prints a token
+agentci ui --cert cert.pem --key key.pem    # serve HTTPS directly (same flags as the gateway)
 ```
 
 ![Starting a job](docs/ui-compose.png)
@@ -152,7 +153,7 @@ agentci ui --host 0.0.0.0     # reachable on the network, prints a token
 - **Switch the project folder** from the top bar: recently used folders (marked when they already have agentci history), a path field and a small folder browser. History, plan and config live in that folder's `.agentci/`, so switching brings the matching history back. `--lock-dir` pins the folder.
 - **Diff viewer** per todo, **history** of all previous runs, stop and resume.
 - Dark and light theme, works on a phone.
-- Served on `localhost` only unless you pass `--host`; then a token is required for every piece of data (kept in `~/.config/agentci/ui-token`). On untrusted networks prefer `ssh -L 4317:localhost:4317 user@server`.
+- Served on `localhost` only unless you pass `--host`; then a token is required for every piece of data (kept in `~/.config/agentci/ui-token`). On untrusted networks use `--cert`/`--key` for HTTPS, or an SSH tunnel: `ssh -L 4317:localhost:4317 user@server`.
 
 #### Behind a reverse proxy / your own domain
 
@@ -326,7 +327,7 @@ The checker, the project map and the diff cost nothing – they run locally with
 ## Development
 
 ```bash
-npm test          # 85 tests, no dependencies, no AI calls
+npm test          # 87 tests, no dependencies, no AI calls
 node bin/agentci.js demo
 ```
 

@@ -57,6 +57,7 @@ ${color.bold('Options')}
   --allow-host <name>         for "ui": accept this Host header (reverse proxy, domain);
                               repeatable or comma-separated, always requires a token
   --lock-dir                  for "ui": do not allow switching the project folder
+  --cert <file> --key <file>  for "ui"/"gateway": serve HTTPS with your own certificate
   --serve                     for "bundle": offer it for download on the network
   --dir <path>                for "bundle": target folder for the package
   --cheap                     cheapest useful setup: haiku + low effort for every role
@@ -148,6 +149,10 @@ async function runWithTerminal(orch, job) {
 }
 
 async function ui(cwd, args) {
+  if (Boolean(args.cert) !== Boolean(args.key)) throw new Error('--cert and --key go together');
+  for (const f of [args.cert, args.key]) {
+    if (f && !fs.existsSync(f)) throw new Error(`certificate file not found: ${f}`);
+  }
   const port = Number.isFinite(args.port) ? args.port : 4317;
   const host = args.host || '127.0.0.1';
   const allowedHosts = args.allowHost || String(process.env.AGENTCI_ALLOWED_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean);
@@ -156,7 +161,7 @@ async function ui(cwd, args) {
   const token = remote ? (args.token || uiToken()) : null;
   let renderer = null;
   const srv = createServer({
-    cwd, port, host, token, allowedHosts, lockDir: Boolean(args.lockDir),
+    cwd, port, host, token, allowedHosts, lockDir: Boolean(args.lockDir), cert: args.cert, key: args.key,
     onOrchestrator(orch) {
       renderer?.detach();
       renderer = new TerminalRenderer({ showFooter: false }).attach(orch);
@@ -169,7 +174,8 @@ async function ui(cwd, args) {
     throw new Error(e.code === 'EADDRINUSE' ? `port ${port} is in use – try --port ${port + 1}` : e.message);
   }
   const shown = allowedHosts[0] || (remote ? (host === '0.0.0.0' || host === '::' ? lanAddresses()[0] || 'THIS-MACHINE' : host) : 'localhost');
-  const url = allowedHosts[0] ? `https://${shown}` : `http://${shown}:${actual}`;
+  const scheme = args.cert || allowedHosts[0] ? 'https' : 'http';
+  const url = allowedHosts[0] && !args.cert ? `https://${shown}` : `${scheme}://${shown}:${actual}`;
   const withToken = token ? `${url}/?token=${token}` : url;
   console.log(`\n  ${color.bold('◆ agentci')} ${color.gray('web interface')}\n`);
   console.log(`  ${color.gray('→')} ${color.bold(withToken)}`);
@@ -403,7 +409,7 @@ const FLAGS = {
   run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap'],
   plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap'],
   resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'cheap'],
-  ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost', 'lockDir'],
+  ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost', 'lockDir', 'cert', 'key'],
   gateway: ['port', 'host', 'token', 'cert', 'key', 'noUi', 'dryRun'],
   bundle: ['serve', 'port', 'host', 'dirOut'],
   demo: ['roles'],
