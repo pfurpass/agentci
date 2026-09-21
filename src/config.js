@@ -18,7 +18,6 @@ export const DEFAULT_CONFIG = {
     maxReviewRounds: 2,     // reviewer ↔ coder rounds per todo
     writeTests: true,       // tester role writes tests per todo
     skipTesterIfTested: true, // save a whole agent call when the coder already wrote tests
-    parallelTodos: 1,       // >1 runs independent todos concurrently (careful: same files)
     timeoutMinutes: 20,     // per agent call
     projectMap: true,       // send agentci's own static project map in the prompts (saves tokens)
   },
