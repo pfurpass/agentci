@@ -65,7 +65,7 @@ const app = {
   agents: new Map(),    // id -> agent info
   openTodos: new Set(),
   editing: null,        // todo id being edited
-  form: { roles: {}, writeTests: true, fixAttempts: 3, cheap: false },
+  form: { roles: {}, writeTests: true, fixAttempts: 3, reviewRounds: 2, maxTodos: 8, strictness: 'normal', instructions: '', cheap: false },
   attachments: [],
 };
 
@@ -181,8 +181,23 @@ function initForm() {
     app.form.roles[r.key] = { provider: rc.provider, model: rc.model || '', enabled };
   }
   app.form.fixAttempts = cfg.pipeline.maxFixAttempts ?? 3;
+  app.form.reviewRounds = cfg.pipeline.maxReviewRounds ?? 2;
+  app.form.maxTodos = cfg.pipeline.maxTodos ?? 8;
+  app.form.strictness = cfg.pipeline.reviewStrictness || 'normal';
+  app.form.instructions = [cfg.instructions || []].flat().join('\n');
   renderTeam();
-  $('#fixAttempts').value = app.form.fixAttempts;
+  renderOptions();
+  $('#instructions').value = app.form.instructions;
+}
+
+const STEP_LIMITS = { fixAttempts: [0, 10], reviewRounds: [0, 10], maxTodos: [1, 30] };
+
+function renderOptions() {
+  for (const k of Object.keys(STEP_LIMITS)) $('#' + k).value = app.form[k];
+  // Review rounds only matter with a reviewer on the team.
+  const reviewer = app.form.roles.reviewer?.enabled;
+  $('#reviewRounds').closest('.stepper').classList.toggle('off', !reviewer || app.form.reviewRounds === 0);
+  document.querySelectorAll('#strictness [data-strict]').forEach((b) => b.classList.toggle('on', b.dataset.strict === app.form.strictness));
 }
 
 function renderTeam() {
@@ -265,7 +280,11 @@ function bindGateway() {
 function formBody(task) {
   const roles = {};
   for (const [k, f] of Object.entries(app.form.roles)) roles[k] = { provider: f.provider, model: f.model.trim() || null, enabled: f.enabled };
-  return { task, roles, writeTests: app.form.roles.tester.enabled, maxFixAttempts: app.form.fixAttempts, cheap: app.form.cheap };
+  const f = app.form;
+  return {
+    task, roles, writeTests: f.roles.tester.enabled, maxFixAttempts: f.fixAttempts, cheap: f.cheap,
+    maxReviewRounds: f.reviewRounds, reviewStrictness: f.strictness, maxTodos: f.maxTodos, instructions: f.instructions,
+  };
 }
 
 async function startRun(kind) {
@@ -307,7 +326,7 @@ function bindCompose() {
   });
   $('#teamGrid').addEventListener('change', (e) => {
     const t = e.target.dataset.toggle;
-    if (t) { app.form.roles[t].enabled = e.target.checked; renderTeam(); }
+    if (t) { app.form.roles[t].enabled = e.target.checked; renderTeam(); renderOptions(); }
   });
   $('#teamGrid').addEventListener('input', (e) => {
     const m = e.target.dataset.model;
@@ -327,14 +346,25 @@ function bindCompose() {
   });
   document.querySelectorAll('.stepper button').forEach((b) => {
     b.onclick = () => {
-      app.form.fixAttempts = Math.max(0, Math.min(10, app.form.fixAttempts + Number(b.dataset.step)));
-      $('#fixAttempts').value = app.form.fixAttempts;
+      const k = b.dataset.field;
+      const [min, max] = STEP_LIMITS[k];
+      app.form[k] = Math.max(min, Math.min(max, app.form[k] + Number(b.dataset.step)));
+      renderOptions();
     };
   });
+  $('#strictness').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-strict]');
+    if (b) { app.form.strictness = b.dataset.strict; renderOptions(); }
+  });
+  $('#instructions').addEventListener('input', (e) => { app.form.instructions = e.target.value; });
   $('#saveDefaultsBtn').onclick = async () => {
     const b = formBody('');
     try {
-      await api('PUT', '/api/config', { roles: b.roles, pipeline: { writeTests: b.writeTests, maxFixAttempts: b.maxFixAttempts } });
+      await api('PUT', '/api/config', {
+        roles: b.roles,
+        pipeline: { writeTests: b.writeTests, maxFixAttempts: b.maxFixAttempts, maxReviewRounds: b.maxReviewRounds, reviewStrictness: b.reviewStrictness, maxTodos: b.maxTodos },
+        instructions: b.instructions.trim(),
+      });
       toast('Saved as default (agentci.config.json)', 'success');
     } catch (e) { toast(e.message, 'error'); }
   };
@@ -623,7 +653,7 @@ function applyEvent(ev) {
     case 'review': {
       const verdict = ev.approved ? '<span class="chip ok">✓ approved</span>' : ev.blocking ? '<span class="chip warn">changes needed</span>' : '<span class="chip ok">✓ ok, nitpicks only</span>';
       const issues = (ev.issues || []).map((i) => `<div class="issue"><span class="sev ${esc(i.severity)}">${esc(i.severity)}</span><div><code>${esc(i.file)}</code> ${esc(i.description)}</div></div>`).join('');
-      feedAppend(evRow('reviewer', `<div class="ev-title"><span class="ev-role">Reviewer</span>${verdict}${ev.round > 1 ? `<span class="ev-meta">round ${ev.round}</span>` : ''}</div><div class="ev-text">${esc(ev.summary)}</div>${issues}`));
+      feedAppend(evRow('reviewer', `<div class="ev-title"><span class="ev-role">Reviewer</span>${verdict}${ev.round > 1 || ev.maxRounds > 1 ? `<span class="ev-meta">round ${ev.round}${ev.maxRounds ? '/' + ev.maxRounds : ''}</span>` : ''}</div><div class="ev-text">${esc(ev.summary)}</div>${issues}`));
       break;
     }
     case 'note':

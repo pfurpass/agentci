@@ -149,7 +149,7 @@ export class TerminalRenderer {
   }
 
   // ---- blocks ----
-  banner(task, team, cwd, gateway) {
+  banner(task, team, cwd, gateway, settings) {
     const w = Math.min(width() - 2, 96);
     const inner = w - 4;
     const row = (s) => st.faint('│ ') + pad(fit(s, inner), inner) + st.faint(' │');
@@ -162,6 +162,7 @@ export class TerminalRenderer {
       ...wrap(task, inner - 10, 3).map((l, i) => row(`${i ? '          ' : st.gray('Task      ')}${st.white(l)}`)),
       row(`${st.gray('Folder    ')}${cwd}`),
       row(`${st.gray('Team      ')}${teamLine}`),
+      ...(settings ? [row(`${st.gray('Settings  ')}${settingsLine(settings)}`)] : []),
       ...(gateway ? [row(`${st.gray('Gateway   ')}${fg(80)('⇄')} ${gateway} ${st.faint('(claude/codex run there)')}`)] : []),
       st.faint('╰' + '─'.repeat(w - 2) + '╯'),
     ];
@@ -186,7 +187,7 @@ export class TerminalRenderer {
 
   on_run_start(ev) {
     this.startedAt = ev.t;
-    this.banner(ev.task, ev.team, ev.cwd, ev.gateway);
+    this.banner(ev.task, ev.team, ev.cwd, ev.gateway, ev.settings);
     this.section('Planning');
   }
 
@@ -194,7 +195,7 @@ export class TerminalRenderer {
     if (this.planned) return; // normal run: banner + plan already shown
     this.planned = true;
     this.startedAt = ev.t;
-    this.banner(ev.task, ev.team, ev.cwd, ev.gateway);
+    this.banner(ev.task, ev.team, ev.cwd, ev.gateway, ev.settings);
     if (this.state) this.print('', renderTodoList(this.state.todos));
   }
 
@@ -275,7 +276,8 @@ export class TerminalRenderer {
   on_review(ev) {
     const sev = { critical: st.red('● critical'), major: fg(209)('● major   '), minor: st.gray('○ minor   ') };
     const verdict = ev.approved ? st.green(st.bold('✓ approved')) : ev.blocking ? st.yellow(st.bold('✗ changes needed')) : st.green(st.bold('✓ ok (nitpicks only)'));
-    const lines = [`${badge('reviewer')} ${verdict}  ${st.gray(oneLine(ev.summary))}`];
+    const round = ev.maxRounds > 1 ? st.faint(` round ${ev.round}/${ev.maxRounds}`) : '';
+    const lines = [`${badge('reviewer')} ${verdict}${round}  ${st.gray(oneLine(ev.summary))}`];
     for (const i of ev.issues || []) lines.push(`${GUT}${sev[i.severity] || i.severity} ${st.white(i.file)}  ${st.gray(oneLine(i.description))}`);
     this.print(...lines);
   }
@@ -334,4 +336,16 @@ export function renderTodoList(todos) {
   const icon = { done: st.green('●'), failed: st.red('✗'), skipped: st.gray('–'), pending: st.gray('○'), in_progress: st.yellow('◐') };
   if (!todos?.length) return st.gray('  (no todos)');
   return todos.map((t) => `  ${icon[t.status] || '?'} ${st.faint(t.id.padEnd(4))} ${t.status === 'done' ? st.gray(t.title) : t.title}${t.dependsOn?.length ? st.faint(`  ← ${t.dependsOn.join(', ')}`) : ''}`).join('\n');
+}
+
+// "review 2× normal · fix 3× · tests · 2 instructions"
+export function settingsLine(s) {
+  const parts = [
+    s.reviewRounds ? `review ${s.reviewRounds}× ${s.reviewStrictness}` : 'no review',
+    `fix ${s.fixAttempts}×`,
+    s.writeTests ? 'tests' : 'no tests',
+    `≤ ${s.maxTodos} todos`,
+  ];
+  if (s.instructions) parts.push(`${s.instructions} instruction${s.instructions > 1 ? 's' : ''}`);
+  return parts.join(st.faint(' · '));
 }

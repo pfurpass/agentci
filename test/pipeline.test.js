@@ -333,3 +333,74 @@ test('an identical error after a fix stops the loop early', async () => {
   assert.equal(fixes, 1, 'one attempt, then stop – not five identical rounds');
   assert.match(notes.join(), /same error after the fix/);
 });
+
+// ---------- review settings ----------
+function reviewRun(pipeline, reviewIssues, extra = {}) {
+  const cwd = tmp();
+  const systems = {};
+  const f = fake({
+    plan: (o) => { systems.planner = o.systemPrompt; return { data: { summary: 's', todos: [{ id: 'T1', title: 'a', details: '', dependsOn: [], acceptance: '' }] } }; },
+    implement: ({ cwd: c, systemPrompt }) => { systems.coder = systemPrompt; fs.writeFileSync(path.join(c, 'a.js'), 'module.exports = 1;\n'); },
+    fix: ({ cwd: c }) => { fs.writeFileSync(path.join(c, 'a.js'), `module.exports = ${Math.random()};\n`); },
+    review: ({ systemPrompt }) => { systems.reviewer = systemPrompt; return { data: { approved: reviewIssues.every((i) => i.severity === 'minor'), summary: 'r', issues: reviewIssues } }; },
+  });
+  const cfg = config({ writeTests: false, ...pipeline });
+  Object.assign(cfg, extra);
+  const orch = new Orchestrator({ cwd, config: cfg, providers: { fake: f.provider } });
+  return orch.run('task').then((st) => ({ st, calls: f.calls, systems }));
+}
+
+const minor = [{ severity: 'minor', file: 'a.js', description: 'naming' }];
+const major = [{ severity: 'major', file: 'a.js', description: 'bug' }];
+
+test('review rounds: the reviewer sends the todo back at most maxReviewRounds times', async () => {
+  const { st, calls } = await reviewRun({ maxReviewRounds: 3 }, major);
+  assert.equal(calls.filter((c) => c.startsWith('reviewer:')).length, 3);
+  assert.equal(calls.filter((c) => c === 'coder:fix:T1').length, 2);
+  assert.match(st.todos[0].notes.join('\n'), /Review not fully addressed/);
+});
+
+test('review rounds: 0 turns the review off', async () => {
+  const { st, calls } = await reviewRun({ maxReviewRounds: 0 }, major);
+  assert.deepEqual(calls, ['planner:plan:-', 'coder:implement:T1']);
+  assert.equal(st.todos[0].status, 'done');
+});
+
+test('strictness: strict fixes minor issues even when approved, lenient ignores major ones', async () => {
+  const strict = await reviewRun({ maxReviewRounds: 2, reviewStrictness: 'strict' }, minor);
+  assert.ok(strict.calls.includes('coder:fix:T1'), 'strict: minor issue goes back to the coder');
+  assert.match(strict.systems.reviewer, /STRICT REVIEW/);
+
+  const normal = await reviewRun({ maxReviewRounds: 2 }, minor);
+  assert.ok(!normal.calls.includes('coder:fix:T1'), 'normal: minor issues do not block');
+
+  const lenient = await reviewRun({ maxReviewRounds: 2, reviewStrictness: 'lenient' }, major);
+  assert.ok(!lenient.calls.includes('coder:fix:T1'), 'lenient: major issues do not block');
+  assert.match(lenient.systems.reviewer, /LENIENT REVIEW/);
+});
+
+test('instructions reach every role; per-role instructions only that role', async () => {
+  const cfg = config();
+  const { systems } = await reviewRun({ maxReviewRounds: 1 }, [], {
+    instructions: 'no new dependencies',
+    roles: { ...cfg.roles, reviewer: { provider: 'fake', model: null, instructions: 'check accessibility' } },
+  });
+  for (const r of ['planner', 'coder', 'reviewer']) assert.match(systems[r], /no new dependencies/, r);
+  assert.match(systems.reviewer, /check accessibility/);
+  assert.doesNotMatch(systems.coder, /check accessibility/);
+});
+
+test('maxTodos caps the plan and is told to the planner', async () => {
+  const cwd = tmp();
+  let sys = '';
+  const f = fake({
+    plan: ({ systemPrompt }) => {
+      sys = systemPrompt;
+      return { data: { summary: 's', todos: [1, 2, 3, 4].map((i) => ({ id: `T${i}`, title: 't', details: '', dependsOn: [], acceptance: '' })) } };
+    },
+  });
+  const orch = new Orchestrator({ cwd, config: config({ maxTodos: 2 }), providers: { fake: f.provider } });
+  const st = await orch.plan('task');
+  assert.match(sys, /1 to 2 todos/);
+  assert.deepEqual(st.todos.map((t) => t.id), ['T1', 'T2']);
+});

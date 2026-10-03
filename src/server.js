@@ -312,7 +312,8 @@ function readBody(req, max = MAX_BODY) {
 }
 
 // Per-run overrides from the web form:
-// { roles: { coder: { provider, model, enabled } }, writeTests, maxFixAttempts }
+// { roles: { coder: { provider, model, enabled } }, writeTests, maxFixAttempts,
+//   maxReviewRounds, reviewStrictness, maxTodos, instructions }
 export function buildConfig(cwd, body = {}) {
   const cfg = loadConfig(cwd);
   for (const [role, rc] of Object.entries(body.roles || {})) {
@@ -331,7 +332,12 @@ export function buildConfig(cwd, body = {}) {
     }
   }
   if (typeof body.writeTests === 'boolean') cfg.pipeline.writeTests = body.writeTests;
-  if (Number.isFinite(body.maxFixAttempts)) cfg.pipeline.maxFixAttempts = Math.max(0, Math.min(10, body.maxFixAttempts));
+  const clampInt = (v, min, max) => Math.max(min, Math.min(max, Math.round(v)));
+  if (Number.isFinite(body.maxFixAttempts)) cfg.pipeline.maxFixAttempts = clampInt(body.maxFixAttempts, 0, 10);
+  if (Number.isFinite(body.maxReviewRounds)) cfg.pipeline.maxReviewRounds = clampInt(body.maxReviewRounds, 0, 10);
+  if (Number.isFinite(body.maxTodos)) cfg.pipeline.maxTodos = clampInt(body.maxTodos, 1, 30);
+  if (typeof body.reviewStrictness === 'string') cfg.pipeline.reviewStrictness = body.reviewStrictness;
+  if (typeof body.instructions === 'string') cfg.instructions = body.instructions.trim();
   return validateConfig(cfg);
 }
 

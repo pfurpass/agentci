@@ -134,3 +134,18 @@ test('checker tells "tool missing" apart from "code broken"', () => {
   const broken = runChecks(d, ['a.js'], { syntax: true, commands: ['node -e "process.exit(1)"'], autoDetectTests: false });
   assert.equal(broken.tooling, false, 'a failing command is not');
 });
+
+test('config: review and planning settings are validated', () => {
+  const d = tmp();
+  const write = (pipeline) => fs.writeFileSync(path.join(d, 'agentci.config.json'), JSON.stringify({ pipeline }));
+  write({ maxReviewRounds: 0, reviewStrictness: 'strict', maxTodos: 3 });
+  const cfg = loadConfig(d);
+  assert.equal(cfg.pipeline.maxReviewRounds, 0);
+  assert.equal(cfg.pipeline.reviewStrictness, 'strict');
+  write({ maxReviewRounds: 11 });
+  assert.throws(() => loadConfig(d), /maxReviewRounds/);
+  write({ reviewStrictness: 'brutal' });
+  assert.throws(() => loadConfig(d), /reviewStrictness/);
+  write({ maxTodos: 0 });
+  assert.throws(() => loadConfig(d), /maxTodos/);
+});

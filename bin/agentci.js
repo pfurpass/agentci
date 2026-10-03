@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { loadConfig, writeDefaultConfig, validateConfig, CONFIG_FILE, PROVIDERS } from '../src/config.js';
+import { loadConfig, writeDefaultConfig, validateConfig, CONFIG_FILE, PROVIDERS, STRICTNESS } from '../src/config.js';
 import { createProviders, preflightAsync, codexHealth } from '../src/providers/index.js';
 import { gatewayHealth } from '../src/providers/remote.js';
 import { createGateway, gatewayDataDir } from '../src/gateway/server.js';
@@ -50,6 +50,14 @@ ${color.bold('Options')}
   --no-tests                  Turn the tester off
   --docs                      Enable the docs agent at the end
   --fix-attempts <n>          Max fix attempts after failing checks (default 3)
+  --review-rounds <n>         How often the reviewer may send a todo back (0–10, default 2, 0 = no review)
+  --strictness <level>        What blocks a review: lenient (critical only) · normal (critical + major)
+                              · strict (everything, including minor nitpicks)
+  --strict                    Short for --strictness strict
+  --max-todos <n>             Upper limit for the planner's todo list (default 8)
+  --timeout <minutes>         Timeout per agent call (default 20)
+  --instructions "<text>"     House rules for every agent, e.g. "TypeScript only, no new dependencies"
+                              (repeatable; per role: roles.<role>.instructions in ${CONFIG_FILE})
   --port <n>                  Port for agentci ui (default 4317)
   --no-open                   Do not open the browser for agentci ui
   --no-ui                     Start the gateway without its monitor web interface
@@ -78,6 +86,12 @@ function parseArgs(argv) {
     else if (a === '--no-review') out.noReview = true;
     else if (a === '--no-tests') out.noTests = true;
     else if (a === '--fix-attempts') out.fixAttempts = Number(argv[++i]);
+    else if (a === '--review-rounds') out.reviewRounds = Number(argv[++i]);
+    else if (a === '--strictness') out.strictness = argv[++i];
+    else if (a === '--strict') out.strictness = 'strict';
+    else if (a === '--max-todos') out.maxTodos = Number(argv[++i]);
+    else if (a === '--timeout') out.timeout = Number(argv[++i]);
+    else if (a === '--instructions') out.instructions = [...(out.instructions || []), argv[++i]];
     else if (a === '--port') out.port = Number(argv[++i]);
     else if (a === '--no-open') out.noOpen = true;
     else if (a === '--no-ui') out.noUi = true;
@@ -116,9 +130,25 @@ function applyOverrides(cfg, args) {
   if (args.noReview) delete cfg.roles.reviewer;
   if (args.noTests) cfg.pipeline.writeTests = false;
   if (args.docs) cfg.roles.docs = { ...(cfg.roles.docs || { provider: 'claude' }), enabled: true };
-  if (Number.isFinite(args.fixAttempts)) cfg.pipeline.maxFixAttempts = args.fixAttempts;
+  if (args.fixAttempts !== undefined) cfg.pipeline.maxFixAttempts = numberFlag('--fix-attempts', args.fixAttempts);
+  if (args.reviewRounds !== undefined) cfg.pipeline.maxReviewRounds = numberFlag('--review-rounds', args.reviewRounds);
+  if (args.maxTodos !== undefined) cfg.pipeline.maxTodos = numberFlag('--max-todos', args.maxTodos);
+  if (args.timeout !== undefined) cfg.pipeline.timeoutMinutes = numberFlag('--timeout', args.timeout, false);
+  if (args.strictness !== undefined) {
+    if (!STRICTNESS.includes(args.strictness)) throw new Error(`--strictness must be one of ${STRICTNESS.join(', ')}`);
+    cfg.pipeline.reviewStrictness = args.strictness;
+  }
+  if (args.instructions?.length) {
+    if (args.instructions.some((i) => !i)) throw new Error('--instructions needs a text, e.g. --instructions "no new dependencies"');
+    cfg.instructions = [cfg.instructions || [], args.instructions].flat().filter(Boolean);
+  }
   if (cfg.roles.docs?.enabled === false) delete cfg.roles.docs;
   return validateConfig(cfg);
+}
+
+function numberFlag(name, v, integer = true) {
+  if (!Number.isFinite(v) || (integer && !Number.isInteger(v))) throw new Error(`${name} needs a ${integer ? 'whole ' : ''}number`);
+  return v;
 }
 
 async function makeOrchestrator(cwd, args, cfgOverride, { check = true } = {}) {
@@ -403,22 +433,25 @@ async function demo(args) {
   console.log(`\n  node calc.js 2 3 → ${color.bold(r.stdout.trim())}`);
 }
 
+const TUNING = ['reviewRounds', 'strictness', 'timeout', 'instructions'];
+
 // Which options make sense for which command – a typo should not be swallowed silently.
 const FLAGS = {
   common: ['dir', 'help'],
-  run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap'],
-  plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap'],
-  resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'cheap'],
+  run: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap', ...TUNING, 'maxTodos'],
+  plan: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'attach', 'cheap', ...TUNING, 'maxTodos'],
+  resume: ['roles', 'noReview', 'noTests', 'docs', 'fixAttempts', 'local', 'cheap', ...TUNING],
   ui: ['port', 'host', 'token', 'noOpen', 'local', 'allowHost', 'lockDir', 'cert', 'key'],
   gateway: ['port', 'host', 'token', 'cert', 'key', 'noUi', 'dryRun'],
   bundle: ['serve', 'port', 'host', 'dirOut'],
-  demo: ['roles'],
+  demo: ['roles', ...TUNING, 'maxTodos', 'fixAttempts'],
   status: [], check: [], init: [], doctor: [],
 };
 const FLAG_NAMES = {
   port: '--port', host: '--host', token: '--token', cert: '--cert', key: '--key', noOpen: '--no-open',
   noUi: '--no-ui', serve: '--serve', allowHost: '--allow-host', lockDir: '--lock-dir', attach: '--attach', cheap: '--cheap', local: '--local', noReview: '--no-review', noTests: '--no-tests',
-  docs: '--docs', fixAttempts: '--fix-attempts', dryRun: '--dry-run', roles: '--planner/--coder/…', dirOut: '--dir',
+  docs: '--docs', fixAttempts: '--fix-attempts', reviewRounds: '--review-rounds', strictness: '--strictness',
+  maxTodos: '--max-todos', timeout: '--timeout', instructions: '--instructions', dryRun: '--dry-run', roles: '--planner/--coder/…', dirOut: '--dir',
 };
 
 function checkFlags(cmd, args) {

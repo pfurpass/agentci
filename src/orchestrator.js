@@ -83,6 +83,20 @@ export class Orchestrator extends EventEmitter {
     return Boolean(rc) && rc.enabled !== false;
   }
 
+  // Role prompt + review strictness + the user's house rules (global and per role).
+  systemPrompt(role, phase) {
+    const p = this.cfg.pipeline;
+    return R.systemPrompt(role === 'coder' && phase === 'fix' ? 'fixer' : role, {
+      maxTodos: p.maxTodos || 8,
+      strictness: p.reviewStrictness || 'normal',
+      instructions: [this.cfg.instructions || [], this.cfg.roles[role]?.instructions || []],
+    });
+  }
+
+  reviewRounds() {
+    return this.has('reviewer') ? Math.max(0, this.cfg.pipeline.maxReviewRounds ?? 2) : 0;
+  }
+
   get aborted() {
     return this.abortController.signal.aborted;
   }
@@ -113,7 +127,7 @@ export class Orchestrator extends EventEmitter {
       this.send('agent.start', { ...base, provider: cand.provider, model: cand.model });
       const opts = {
         role, phase, todo, prompt, schema, canEdit,
-        systemPrompt: R.SYSTEM[role === 'coder' && phase === 'fix' ? 'fixer' : role],
+        systemPrompt: this.systemPrompt(role, phase),
         cwd: this.cwd, model: cand.model || undefined, effort: ci === 0 ? rc.effort || undefined : undefined,
       attachments: this.attachments(),
         timeoutMs: (this.cfg.pipeline.timeoutMinutes || 20) * 60_000,
@@ -163,12 +177,15 @@ export class Orchestrator extends EventEmitter {
       task, summary: '', todos: [], costUsd: 0, startedAt: Date.now(), phase: 'planning',
       team: teamOf(this.cfg), gateway: this.gateway, attachments: listAttachments(this.cwd),
     };
-    this.send('run.start', { runId: this.state.runId, task, team: this.state.team, cwd: this.cwd, gateway: this.gateway });
+    this.send('run.start', { runId: this.state.runId, task, team: this.state.team, cwd: this.cwd, gateway: this.gateway, settings: settingsOf(this.cfg) });
     this.save();
     try {
       const res = await this.callAgent('planner', 'plan', this.context(R.planPrompt(task, projectInfo(this.cwd, this.cfg.ignore, this.codeMap())), [], 14_000), { schema: R.PLAN_SCHEMA });
       this.state.summary = res.data.summary || '';
-      this.state.todos = normalizeTodos(res.data.todos || []);
+      const raw = res.data.todos || [];
+      const max = this.cfg.pipeline.maxTodos || 8;
+      if (raw.length > max) this.send('note', { todo: null, level: 'warn', text: `planner returned ${raw.length} todos – keeping the first ${max} (pipeline.maxTodos)` });
+      this.state.todos = normalizeTodos(raw.slice(0, max));
       this.state.phase = 'planned';
       this.save();
       this.send('plan', { summary: this.state.summary, todos: this.state.todos });
@@ -185,7 +202,7 @@ export class Orchestrator extends EventEmitter {
     st.phase = 'executing';
     st.resumedAt = Date.now();
     st.gateway = this.gateway;
-    this.send('run.resume', { runId: st.runId, task: st.task, team: teamOf(this.cfg), cwd: this.cwd, gateway: this.gateway });
+    this.send('run.resume', { runId: st.runId, task: st.task, team: teamOf(this.cfg), cwd: this.cwd, gateway: this.gateway, settings: settingsOf(this.cfg) });
     this.save();
 
     try {
@@ -264,7 +281,7 @@ export class Orchestrator extends EventEmitter {
       }
       if (!(await this.checkAndFix(todo, before))) return this.finish(todo, 'failed', before);
 
-      const rounds = this.has('reviewer') ? Math.max(1, p.maxReviewRounds) : 0;
+      const rounds = this.reviewRounds();
       let testsWritten = !(p.writeTests && this.has('tester'));
       for (let round = 1; round <= rounds; round++) {
         const after = snapshot(this.cwd, this.cfg.ignore);
@@ -296,11 +313,12 @@ export class Orchestrator extends EventEmitter {
         }
 
         if (!review) break;
-        const blocking = R.formatReviewIssues(review.data);
+        const blocking = R.formatReviewIssues(review.data, p.reviewStrictness);
         todo.reviewRounds = round;
         todo.review = { approved: !!review.data.approved, summary: review.data.summary, issues: review.data.issues || [] };
-        this.send('review', { todo: todo.id, round, ...todo.review, blocking: !!blocking });
-        if (review.data.approved || !blocking) break;
+        this.send('review', { todo: todo.id, round, maxRounds: rounds, ...todo.review, blocking: !!blocking });
+        // Strictness decides what blocks – a strict run fixes "minor" issues even when the reviewer approved.
+        if (!blocking) break;
         if (round === rounds) {
           todo.notes.push(`Review not fully addressed:\n${blocking}`);
           this.send('note', { todo: todo.id, level: 'warn', text: 'maximum review rounds reached – finishing the todo with a note' });
@@ -447,6 +465,18 @@ export function cleanOutput(s, cwd) {
 function tail(s, max) {
   s = String(s || '');
   return s.length > max ? '…' + s.slice(-max) : s;
+}
+
+// The knobs that shape a run, shown in the terminal banner and the web UI.
+export function settingsOf(cfg) {
+  const p = cfg.pipeline;
+  const rounds = cfg.roles.reviewer && cfg.roles.reviewer.enabled !== false ? p.maxReviewRounds ?? 2 : 0;
+  const custom = [cfg.instructions, ...Object.values(cfg.roles).map((r) => r?.instructions)].flat().filter((i) => String(i || '').trim());
+  return {
+    reviewRounds: rounds, reviewStrictness: p.reviewStrictness || 'normal',
+    fixAttempts: p.maxFixAttempts, maxTodos: p.maxTodos || 8, writeTests: p.writeTests !== false,
+    instructions: custom.length,
+  };
 }
 
 export function teamOf(cfg) {

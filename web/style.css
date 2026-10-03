@@ -646,3 +646,12 @@ kbd { font-size: 11px; padding: 1px 6px; border: 1px solid var(--line-2); border
 .gfolder { fill: var(--docs); }
 .gtodo { fill: var(--success); font: 600 10.5px var(--mono); text-anchor: end; }
 .ggroup { cursor: pointer; }
+
+.advanced { margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.advanced summary { cursor: pointer; padding: 10px 14px; font-size: 13px; color: var(--muted); user-select: none; }
+.advanced[open] summary { border-bottom: 1px solid var(--line); }
+.adv-grid { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px; }
+.adv-field { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.adv-wide { flex-basis: 100%; flex-direction: column; align-items: stretch; gap: 6px; }
+.adv-wide textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; color: var(--text); background: var(--panel-3); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.stepper.off { opacity: .55; }

@@ -138,6 +138,24 @@ agentci run --planner claude:haiku --no-tests "…"      # cheap and quick
 agentci run --docs "…"                                  # enable the docs agent
 ```
 
+Decide how hard the team works:
+
+```bash
+agentci run --review-rounds 4 --strict "…"     # up to 4 review rounds, even nitpicks get fixed
+agentci run --review-rounds 1 --strictness lenient "…"   # one look, only critical issues block
+agentci run --review-rounds 0 "…"              # no review at all (same as --no-review)
+agentci run --max-todos 3 --timeout 10 "…"     # small plan, 10 min per agent call
+agentci run --instructions "TypeScript only" --instructions "no new dependencies" "…"
+```
+
+| Strictness | What sends a todo back to the coder |
+|---|---|
+| `lenient` | only *critical* issues (broken feature, data loss, security hole) |
+| `normal` (default) | *critical* and *major* issues |
+| `strict` | everything, including *minor* nitpicks – even when the reviewer approved |
+
+The same settings are in the web UI: **Review rounds** next to the fix attempts, strictness, max todos and house rules under **Advanced**. *Save as default* writes them to `agentci.config.json`.
+
 ## Web interface
 
 ```bash
@@ -263,7 +281,11 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
     "tester":   { "provider": "claude", "model": "sonnet", "fallback": "claude:sonnet" },
     "docs":     { "provider": "claude", "model": "haiku", "enabled": false }
   },
-  "pipeline": { "maxFixAttempts": 3, "maxReviewRounds": 2, "writeTests": true, "projectMap": true, "timeoutMinutes": 20 },
+  "pipeline": {
+    "maxFixAttempts": 3, "maxReviewRounds": 2, "reviewStrictness": "normal", "maxTodos": 8,
+    "writeTests": true, "projectMap": true, "timeoutMinutes": 20
+  },
+  "instructions": "Comments in English, no new dependencies",
   "checks":   { "syntax": true, "commands": ["npm run lint"], "autoDetectTests": true },
   "permissions": {
     "claudeMode": "acceptEdits",
@@ -272,6 +294,10 @@ Or copy it: `agentci bundle --dir /media/stick` produces a ~90 kB `.tgz` plus `i
   }
 }
 ```
+
+**`instructions`** are house rules every agent gets in its role prompt (a string or a list). A role can have its own on top, e.g. `"reviewer": { "provider": "codex", "instructions": "also check accessibility" }`.
+
+**`maxReviewRounds`** (0–10) is how often the reviewer may send a todo back; `0` skips the review. **`reviewStrictness`** decides which issues block (see the table above).
 
 **`fallback`** takes over when a provider fails or hits its usage limit ("You've hit your usage limit") – without pointless retries, and the exhausted provider is skipped for the rest of the run. If the reviewer or tester drops out entirely, the todo is marked *unreviewed* / *untested* instead of failing.
 

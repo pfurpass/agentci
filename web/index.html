@@ -106,14 +106,44 @@
               <label class="toggle-sm cheap-toggle" title="haiku + low effort for every role – roughly a third of the cost">
                 <input type="checkbox" id="cheapMode"><span>Cheap mode</span>
               </label>
-              <label class="stepper">
+              <label class="stepper" title="How often the coder may retry after failing checks">
                 <span>Fix attempts</span>
-                <button type="button" data-step="-1" aria-label="fewer">−</button>
+                <button type="button" data-field="fixAttempts" data-step="-1" aria-label="fewer">−</button>
                 <output id="fixAttempts">3</output>
-                <button type="button" data-step="1" aria-label="more">+</button>
+                <button type="button" data-field="fixAttempts" data-step="1" aria-label="more">+</button>
+              </label>
+              <label class="stepper" title="How often the reviewer may send a todo back to the coder (0 = no review)">
+                <span>Review rounds</span>
+                <button type="button" data-field="reviewRounds" data-step="-1" aria-label="fewer">−</button>
+                <output id="reviewRounds">2</output>
+                <button type="button" data-field="reviewRounds" data-step="1" aria-label="more">+</button>
               </label>
               <button type="button" class="btn btn-ghost btn-sm" id="saveDefaultsBtn">Save as default</button>
             </div>
+
+            <details class="advanced" id="advanced">
+              <summary>Advanced</summary>
+              <div class="adv-grid">
+                <div class="adv-field">
+                  <span class="adv-label">Review strictness</span>
+                  <div class="seg" id="strictness">
+                    <button type="button" data-strict="lenient" title="Only critical issues go back to the coder">Lenient</button>
+                    <button type="button" data-strict="normal" title="Critical and major issues go back to the coder">Normal</button>
+                    <button type="button" data-strict="strict" title="Every issue, including minor nitpicks, goes back to the coder">Strict</button>
+                  </div>
+                </div>
+                <label class="stepper" title="Upper limit for the planner's todo list">
+                  <span>Max todos</span>
+                  <button type="button" data-field="maxTodos" data-step="-1" aria-label="fewer">−</button>
+                  <output id="maxTodos">8</output>
+                  <button type="button" data-field="maxTodos" data-step="1" aria-label="more">+</button>
+                </label>
+                <label class="adv-field adv-wide">
+                  <span class="adv-label">House rules for every agent</span>
+                  <textarea id="instructions" rows="3" placeholder="e.g. TypeScript only · no new dependencies · comments in English"></textarea>
+                </label>
+              </div>
+            </details>
           </form>
         </div>
       </section>

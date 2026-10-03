@@ -409,3 +409,13 @@ test('--cert without --key is rejected', () => {
   const srv = createServer({ cwd: dir, port: 0, cert: '/nope.pem' });
   assert.equal(srv.tls, false, 'a certificate without a key does not enable TLS');
 });
+
+test('buildConfig: review rounds, strictness, max todos and house rules from the web form', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'agentci-srv-'));
+  const cfg = buildConfig(cwd, { maxReviewRounds: 42, reviewStrictness: 'lenient', maxTodos: 3, instructions: '  no new deps  ' });
+  assert.equal(cfg.pipeline.maxReviewRounds, 10, 'clamped');
+  assert.equal(cfg.pipeline.reviewStrictness, 'lenient');
+  assert.equal(cfg.pipeline.maxTodos, 3);
+  assert.equal(cfg.instructions, 'no new deps');
+  assert.throws(() => buildConfig(cwd, { reviewStrictness: 'brutal' }), /reviewStrictness/);
+});

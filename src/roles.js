@@ -50,16 +50,18 @@ export const REVIEW_SCHEMA = {
   },
 };
 
-export const SYSTEM = {
-  planner: `You are the PLANNER in a team of AI agents (planner, coder, reviewer, tester).
+const plannerSystem = (maxTodos) => `You are the PLANNER in a team of AI agents (planner, coder, reviewer, tester).
 You do NOT write code. You inspect the existing project (read-only) and split the task into a short,
 ordered todo list that a coder agent can implement one item at a time.
 Rules:
-- 1 to 8 todos. Each todo is a coherent, independently checkable unit of work (not "write tests" alone – testing is done by the tester agent).
+- 1 to ${maxTodos} todos. Each todo is a coherent, independently checkable unit of work (not "write tests" alone – testing is done by the tester agent).
 - ids are "T1", "T2", ... ; dependsOn lists ids that must be finished first.
 - details: concrete files, functions, APIs, edge cases. The coder only sees the task, the plan and the current todo.
 - acceptance: how to verify the todo is done.
-${LANG}`,
+${LANG}`;
+
+export const SYSTEM = {
+  planner: plannerSystem(8),
 
   coder: `You are the CODER in a team of AI agents. You implement exactly ONE todo from the plan, directly in the
 files of the working directory. Keep the changes focused on the todo; don't implement other todos.
@@ -87,6 +89,28 @@ Reply with a short summary: which tests, which file. ${LANG}`,
 what was built: purpose, setup, usage examples. Keep it concise and accurate – read the code first.
 Reply with a short summary. ${LANG}`,
 };
+
+// Which review severities send the todo back to the coder.
+export const BLOCKING = {
+  lenient: ['critical'],
+  normal: ['critical', 'major'],
+  strict: ['critical', 'major', 'minor'],
+};
+
+const STRICTNESS_HINT = {
+  lenient: 'LENIENT REVIEW: only "critical" issues block (broken feature, data loss, security hole). Report everything else as "major" or "minor" – it is only noted, not fixed.',
+  strict: 'STRICT REVIEW: every issue you report blocks, including "minor" ones (naming, readability, missing edge cases, inconsistent style). Set approved=false whenever you report any issue.',
+};
+
+// System prompt for one call: the role text plus the run's settings and the user's own instructions.
+// key: planner | coder | fixer | reviewer | tester | docs
+export function systemPrompt(key, { maxTodos = 8, strictness = 'normal', instructions = [] } = {}) {
+  let text = key === 'planner' ? plannerSystem(maxTodos) : SYSTEM[key];
+  if (key === 'reviewer' && STRICTNESS_HINT[strictness]) text += `\n${STRICTNESS_HINT[strictness]}`;
+  const extra = instructions.flat().map((i) => String(i || '').trim()).filter(Boolean);
+  if (extra.length) text += `\n\nINSTRUCTIONS FROM THE USER (always follow them):\n${extra.map((i) => `- ${i}`).join('\n')}`;
+  return text;
+}
 
 export function planPrompt(task, projectInfo) {
   return `TASK:\n${task}\n\nPROJECT (working directory):\n${projectInfo}\n\nCreate the plan.`;
@@ -131,9 +155,10 @@ export function docsPrompt(state) {
   return `${planContext(state)}\n\nAll todos are done. Update the documentation now.`;
 }
 
-export function formatReviewIssues(review) {
+export function formatReviewIssues(review, strictness = 'normal') {
+  const blocking = BLOCKING[strictness] || BLOCKING.normal;
   return (review.issues || [])
-    .filter((i) => i.severity !== 'minor')
+    .filter((i) => blocking.includes(i.severity))
     .map((i) => `- [${i.severity}] ${i.file}: ${i.description}`)
     .join('\n');
 }
